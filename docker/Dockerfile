@@ -7,14 +7,11 @@
 FROM eclipse-temurin:21-jdk AS builder
 
 # Build arguments
-# IMPORTANT: keep GHIDRA_VERSION in sync with pom.xml's <ghidra.version>.
-# The Maven build resolves ghidra:* artifacts at this exact version, and the
-# install-file step below stamps that version onto the JARs we extract from
-# the Ghidra release zip. A mismatch means Maven can't resolve dependencies
-# (see #183). GHIDRA_DATE must match the asset filename of the chosen
-# version on the upstream NSA/ghidra GitHub release.
-ARG GHIDRA_VERSION=12.1.2
-ARG GHIDRA_DATE=20260605
+# GHIDRA_DATE must match the asset filename of the chosen version on the
+# upstream NSA/ghidra GitHub release. The Maven project normally pins its own
+# Ghidra version, so the Docker build explicitly overrides that property below.
+ARG GHIDRA_VERSION=12.1.3
+ARG GHIDRA_DATE=20260817
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -79,7 +76,7 @@ COPY src ./src
 COPY lib ./lib
 
 # Build the plugin with headless profile (skip tests for Docker build)
-RUN mvn clean package -P headless -DskipTests -q
+RUN mvn clean package -P headless -DskipTests -Dghidra.version=${GHIDRA_VERSION} -q
 
 # =============================================================================
 # Stage 2: Runtime - Minimal image with Ghidra and plugin
@@ -160,4 +157,3 @@ ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Default command (can be overridden)
 CMD ["--port", "8089"]
-
