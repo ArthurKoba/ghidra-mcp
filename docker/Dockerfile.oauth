@@ -1,0 +1,15 @@
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+WORKDIR /app
+
+RUN uv pip install --system \
+    "fastmcp==4.0.3" \
+    "uvicorn>=0.35,<1"
+
+COPY docker/oauth_proxy.py /app/oauth_proxy.py
+
+ENV FASTMCP_HOME=/data/fastmcp
+
+EXPOSE 8000
+
+CMD ["uvicorn", "oauth_proxy:app", "--host", "0.0.0.0", "--port", "8000"]
