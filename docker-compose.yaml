@@ -1,0 +1,52 @@
+services:
+  ghidra:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_PORT: "8089"
+      GHIDRA_MCP_AUTH_TOKEN: "${GHIDRA_MCP_AUTH_TOKEN}"
+      GHIDRA_MCP_ALLOW_SCRIPTS: "1"
+      GHIDRA_MCP_FILE_ROOT: "/workspace"
+      JAVA_OPTS: "-Xmx4g -XX:+UseG1GC"
+    volumes:
+      - /srv/ghidra/data:/data
+      - /srv/ghidra/projects:/projects
+      - /srv/ghidra/workspace:/workspace
+      - /srv/ghidra/scripts:/workspace/scripts
+      - /srv/ghidra/exports:/workspace/exports
+    mem_limit: 6g
+    cpus: 4
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8089/check_connection"]
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    networks:
+      coolify:
+        aliases:
+          - ghidra
+
+  bridge:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bridge
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_URL: "http://ghidra:8089/"
+      GHIDRA_MCP_AUTH_TOKEN: "${GHIDRA_MCP_AUTH_TOKEN}"
+      GHIDRA_MCP_ALLOWED_HOSTS: "ghidra-mcp,bridge,localhost,127.0.0.1"
+    depends_on:
+      ghidra:
+        condition: service_healthy
+    networks:
+      coolify:
+        aliases:
+          - ghidra-mcp
+
+networks:
+  coolify:
+    external: true
