@@ -15,7 +15,7 @@ services:
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/projects:/projects/anjia-ajl33pq0866-fh8626v100
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/workspace:/workspace/anjia-ajl33pq0866-fh8626v100/workspace
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/evidence:/workspace/anjia-ajl33pq0866-fh8626v100/evidence:ro
-      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/scripts:/home/ubuntu/ghidra_scripts:ro
+      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/scripts:/home/ubuntu/ghidra_scripts
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/exports:/workspace/anjia-ajl33pq0866-fh8626v100/exports
     mem_limit: 6g
     cpus: 4
