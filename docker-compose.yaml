@@ -17,6 +17,8 @@ services:
       - /srv/ghidra/scripts:/workspace/scripts
       - /srv/ghidra/scripts/FH8626V100:/home/ubuntu/ghidra_scripts:ro
       - /srv/ghidra/evidence/FH8626V100_REVERSE_EVIDENCE:/workspace/evidence/FH8626V100_REVERSE_EVIDENCE:ro
+      - /srv/ghidra/workspace/FH8626V100:/home/koba/FH8626V100
+      - /srv/ghidra/evidence/FH8626V100_REVERSE_EVIDENCE/corpus/FH8626_STOCK_EVIDENCE_20260828/canonical_v2/runtime_evidence/fh_stock_TELE_NIGHT_TO_TELE_DAY_20260828_R1/TELE_NIGHT_TO_TELE_DAY:/home/koba/FH8626V100/archive/FH8626_REVERSE_HEAVY_v1R3_CANONICAL_20260830/source_vault/target_live/runtime/stock_acquisition_20260828/fh_stock_TELE_NIGHT_TO_TELE_DAY_20260828_R1/TELE_NIGHT_TO_TELE_DAY:ro
       - /srv/ghidra/exports:/workspace/exports
     mem_limit: 6g
     cpus: 4
