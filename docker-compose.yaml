@@ -15,6 +15,8 @@ services:
       - /srv/ghidra/projects:/projects
       - /srv/ghidra/workspace:/workspace
       - /srv/ghidra/scripts:/workspace/scripts
+      - /srv/ghidra/scripts/FH8626V100:/home/ubuntu/ghidra_scripts:ro
+      - /srv/ghidra/evidence/FH8626V100_REVERSE_EVIDENCE:/workspace/evidence/FH8626V100_REVERSE_EVIDENCE:ro
       - /srv/ghidra/exports:/workspace/exports
     mem_limit: 6g
     cpus: 4
