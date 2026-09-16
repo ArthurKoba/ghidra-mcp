@@ -61,8 +61,19 @@ def is_pid_alive(pid: int) -> bool:
         raise
 
 
+def _trusted_server_hosts() -> set[str]:
+    """Return explicitly trusted non-loopback hosts for the TCP backend.
+
+    Loopback hosts are always accepted. Operators may additionally allow
+    specific Docker/container DNS names with GHIDRA_MCP_TRUSTED_HOSTS, using a
+    comma-separated allowlist such as ``ghidra,ghidra-internal``.
+    """
+    raw = os.getenv("GHIDRA_MCP_TRUSTED_HOSTS", "")
+    return {item.strip().lower() for item in raw.split(",") if item.strip()}
+
+
 def validate_server_url(url: str) -> bool:
-    """Validate that a TCP server URL is both safe (local-only) and usable.
+    """Validate that a TCP server URL is both trusted and usable.
 
     The TCP transport (``transport.tcp_request``) feeds this URL straight into a
     stdlib ``http.client.HTTPConnection(parsed.hostname, parsed.port)`` — plain
@@ -72,7 +83,8 @@ def validate_server_url(url: str) -> bool:
 
     - scheme must be ``http`` — ``https`` would be accepted then fail (the
       transport never negotiates TLS).
-    - host must be loopback (``127.0.0.1``/``localhost``/``::1``).
+    - host must be loopback (``127.0.0.1``/``localhost``/``::1``) or explicitly
+      allowlisted through ``GHIDRA_MCP_TRUSTED_HOSTS``.
     - port must be explicit — a missing port silently defaults to 80 in
       ``HTTPConnection``, never the Ghidra server's actual port.
     """
@@ -80,7 +92,9 @@ def validate_server_url(url: str) -> bool:
         parsed = urlparse(url)
         if parsed.scheme != "http":
             return False
-        if parsed.hostname not in ("127.0.0.1", "localhost", "::1"):
+        hostname = (parsed.hostname or "").lower()
+        allowed_hosts = {"127.0.0.1", "localhost", "::1"} | _trusted_server_hosts()
+        if hostname not in allowed_hosts:
             return False
         if parsed.port is None:
             return False
