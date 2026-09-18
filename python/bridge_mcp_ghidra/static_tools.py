@@ -585,6 +585,7 @@ async def search_tools(query: str, limit: int = 15) -> str:
 
 @mcp.tool()
 async def import_file(
+    project_id: str,
     file_path: str,
     project_folder: str = "/",
     language: str | None = None,
@@ -593,22 +594,16 @@ async def import_file(
     ctx: Context | None = None,
 ) -> str:
     """
-    Import a binary file from disk into the current Ghidra project.
+    Import a binary file into the explicitly selected Ghidra project session.
 
-    Imports the file, opens it in the CodeBrowser, and optionally starts auto-analysis.
-    When analysis is enabled, sends a log notification when analysis completes.
-
-    For raw firmware binaries, specify language (e.g. "ARM:LE:32:Cortex") and
-    optionally compiler_spec (e.g. "default"). Without language, Ghidra auto-detects
-    the format (works for ELF, PE, Mach-O, etc.).
-
-    Args:
-        file_path: Absolute path to the binary file on disk
-        project_folder: Destination folder in the Ghidra project (default: "/")
-        language: Language ID for raw binaries (e.g. "ARM:LE:32:Cortex", "x86:LE:64:default")
-        compiler_spec: Compiler spec ID (e.g. "default", "gcc"). Uses language default if omitted.
-        auto_analyze: Start auto-analysis after import (default: true)
+    project_id is mandatory and is obtained from list_projects(). The call is
+    pinned to that project's worker for its entire lifetime.
     """
+    try:
+        lease = await state.run_in_worker(project_sessions.checkout, project_id)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
     payload: dict = {
         "file_path": file_path,
         "project_folder": project_folder,
@@ -619,43 +614,59 @@ async def import_file(
     if compiler_spec:
         payload["compiler_spec"] = compiler_spec
 
-    result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
-
-    # Parse result to check if analysis was started
+    keep_lease_for_poll = False
     try:
-        data = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return result
+        result = await state.run_blocking_ghidra_call(
+            dispatch.dispatch_post,
+            "/import_file",
+            payload,
+            connection=lease.snapshot,
+        )
 
-    if data.get("data", {}).get("analyzing") and ctx is not None:
-        program_name = data["data"].get("name", "unknown")
-        # Capture the session before the tool call returns
-        session = ctx.request_context.session
+        try:
+            data = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return result
 
-        async def _poll_analysis():
-            """Poll analysis_status until analysis completes, then send log notification."""
-            await asyncio.sleep(5)  # Initial delay
-            for _ in range(360):  # Up to 30 minutes
+        response_data = data.get("data", data) if isinstance(data, dict) else {}
+        if response_data.get("analyzing") and ctx is not None:
+            keep_lease_for_poll = True
+            program_name = response_data.get("name", "unknown")
+            session = ctx.request_context.session
+
+            async def _poll_analysis():
                 try:
-                    status_text = await state.run_blocking_ghidra_call(
-                        dispatch.dispatch_get, "/analysis_status", {"program": program_name}
-                    )
-                    status = json.loads(status_text)
-                    status_data = status.get("data", status)
-                    if not status_data.get("analyzing", True):
-                        fn_count = status_data.get("function_count", "?")
-                        await session.send_log_message(
-                            level="info",
-                            data=f"Analysis complete for {program_name}: {fn_count} functions found",
-                        )
-                        return
-                except Exception as e:
-                    logger.debug(f"Analysis poll error for {program_name}: {e}")
-                await asyncio.sleep(5)
+                    await asyncio.sleep(5)
+                    for _ in range(360):
+                        try:
+                            status_text = await state.run_blocking_ghidra_call(
+                                dispatch.dispatch_get,
+                                "/analysis_status",
+                                {"program": program_name},
+                                connection=lease.snapshot,
+                            )
+                            status = json.loads(status_text)
+                            status_data = status.get("data", status)
+                            if not status_data.get("analyzing", True):
+                                fn_count = status_data.get("function_count", "?")
+                                await session.send_log_message(
+                                    level="info",
+                                    data=f"Analysis complete for {program_name}: {fn_count} functions found",
+                                )
+                                return
+                        except Exception as exc:
+                            logger.debug(f"Analysis poll error for {program_name}: {exc}")
+                        await asyncio.sleep(5)
+                finally:
+                    await state.run_in_worker(project_sessions.release_lease, lease)
 
-        asyncio.create_task(_poll_analysis())
+            asyncio.create_task(_poll_analysis())
 
-    return result
+        return result
+    finally:
+        if not keep_lease_for_poll:
+            await state.run_in_worker(project_sessions.release_lease, lease)
+
 
 
 def _auto_connect() -> bool:
