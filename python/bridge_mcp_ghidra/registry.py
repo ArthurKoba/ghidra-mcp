@@ -6,6 +6,7 @@ import json
 import sys
 
 from . import dispatch
+from . import project_sessions
 from . import state
 from . import transport
 from .config import STATIC_TOOL_NAMES, _ALL_STATIC_TOOL_NAMES, logger
@@ -22,7 +23,7 @@ for _static_tool_name in _ALL_STATIC_TOOL_NAMES:
 
 def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
     """Build a callable that dispatches to the Ghidra HTTP endpoint."""
-    properties = params_schema.get("properties", {})
+    properties = dict(params_schema.get("properties", {}))
     required = set(params_schema.get("required", []))
     # Program selectors: params that pick which open program a call operates on.
     # Most tools use plain `program=`; the cross-program tools (diff_functions,
@@ -46,6 +47,10 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         return bool(value)
 
     def handler(**kwargs):
+        # project_id is bridge-only routing metadata. It must never be forwarded
+        # to the Java endpoint.
+        kwargs.pop("project_id", None)
+
         # Sanitize address parameters before dispatch
         for pname, pdef in properties.items():
             if pdef.get("param_type") == "address" and pname in kwargs and kwargs[pname] is not None:
@@ -134,7 +139,13 @@ def _build_tool_function(endpoint: str, http_method: str, params_schema: dict):
         else:
             optional_params.append(param)
 
-    sig_params = required_params + optional_params
+    sig_params = [
+        inspect.Parameter(
+            "project_id",
+            inspect.Parameter.KEYWORD_ONLY,
+            annotation=str,
+        )
+    ] + required_params + optional_params
     # Add dry_run parameter for POST (write) endpoints
     if use_synthetic_dry_run:
         sig_params.append(
@@ -166,11 +177,35 @@ def _register_tool_def(tool_def: dict) -> bool:
     sync_handler = _build_tool_function(endpoint, http_method, input_schema)
 
     async def handler(**kwargs):
-        # FastMCP calls synchronous tools directly on its event loop. Keep the
-        # blocking Ghidra HTTP lifecycle in a worker thread so one slow request
-        # cannot close or starve the entire MCP session.
-        return await state.run_blocking_ghidra_call(sync_handler, **kwargs)
+        # Every dynamic Ghidra call is project-scoped. Resolve a sticky worker
+        # lease first, then bind only this request to that immutable connection.
+        project_id = str(kwargs.get("project_id", "")).strip()
+        if not project_id:
+            return json.dumps(
+                {
+                    "error": (
+                        "project_id is required. Call list_projects() and pass the "
+                        "returned project_id explicitly."
+                    )
+                }
+            )
+        try:
+            lease = await state.run_in_worker(project_sessions.checkout, project_id)
+        except project_sessions.ProjectSessionError as exc:
+            return json.dumps({"error": str(exc)})
+        try:
+            return await state.run_blocking_ghidra_call(
+                sync_handler,
+                connection=lease.snapshot,
+                **kwargs,
+            )
+        finally:
+            await state.run_in_worker(project_sessions.release_lease, lease)
 
+    description = (
+        description
+        + "\n\nRouting: project_id is required and selects an isolated headless project session."
+    )
     handler.__signature__ = sync_handler.__signature__
     handler.__annotations__ = sync_handler.__annotations__
     handler.__name__ = name

@@ -67,13 +67,20 @@ CATEGORY_SECTIONS: dict[str, tuple[str, str]] = {
 # tool cannot be silently omitted.
 STATIC_TOOL_DESCRIPTIONS: dict[str, str] = {
     "list_instances": "Discover running Ghidra MCP instances (UDS + TCP port scan)",
-    "connect_instance": "Connect the bridge to a specific Ghidra instance",
+    "connect_instance": "Resolve a project selector and activate its isolated worker session",
+    "list_projects": "List projects with stable project_id values and session state",
+    "open_project": "Activate an isolated worker session for project_id",
+    "close_project": "Close and release the worker session for project_id",
+    "create_project": "Create a local project and return its stable project_id",
+    "delete_project": "Delete a project by stable project_id",
+    "project_session_info": "Inspect worker/session state for one project_id",
+    "release_project_session": "Release an idle project worker session",
     "list_tool_groups": "List tool groups and their load state",
     "load_tool_group": "Register a tool group's dynamic tools with the MCP client",
     "unload_tool_group": "Unregister a tool group's dynamic tools",
     "check_tools": "Report which tools are currently registered and callable",
     "search_tools": "Search the full tool catalog by keyword",
-    "import_file": "Import a binary from disk into the current project and open it",
+    "import_file": "Import a binary into an explicit project_id session",
 }
 
 

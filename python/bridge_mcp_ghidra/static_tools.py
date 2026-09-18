@@ -8,165 +8,13 @@ import time
 
 from . import discovery
 from . import dispatch
+from . import project_sessions
 from . import registry
 from . import state
 from . import transport
 from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
 from .server import Context, mcp
 from .validation import validate_server_url
-
-
-def _connect_instance_sync(project: str) -> dict:
-    """Blocking connect_instance implementation for worker-thread execution."""
-    cancel_handle = state.get_request_cancel_handle()
-
-    def _commit_if_live(func, /, *args, **kwargs):
-        if cancel_handle is None:
-            return func(*args, **kwargs)
-        return cancel_handle.run_if_not_aborted(func, *args, **kwargs)
-
-    instances = discovery.discover_instances()
-
-    # Try UDS instances first
-    match = None
-    matched_tcp_url = None
-    if instances:
-        for inst in instances:
-            if inst.get("project", "") == project:
-                match = inst
-                break
-        if not match:
-            for inst in instances:
-                if project.lower() in inst.get("project", "").lower():
-                    match = inst
-                    break
-        if match and not transport.uds_supported():
-            matched_tcp_url = match.get("url")
-        elif match:
-            candidate = state.build_connection_snapshot(
-                mode="uds",
-                active_socket=match["socket"],
-                connected_project=match.get("project"),
-            )
-            try:
-                schema = registry._fetch_schema(connection=candidate)
-            except Exception as e:
-                return {
-                    "error": f"Schema fetch failed: {e}",
-                    "socket": match["socket"],
-                }
-            if cancel_handle is not None and cancel_handle.aborted:
-                return {"error": "connect_instance cancelled before commit"}
-            with state._tool_registry_lock:
-                result = _commit_if_live(
-                    lambda: (
-                        registry.register_tools_from_schema(
-                            schema,
-                            groups=None if not state._lazy_mode else state._default_groups,
-                        ),
-                        state.set_connection_snapshot(
-                            "uds",
-                            active_socket=match["socket"],
-                            active_tcp=None,
-                            connected_project=match.get("project"),
-                        ),
-                    )
-                )
-                if result is None:
-                    return {"error": "connect_instance cancelled before commit"}
-                count, installed = result
-            total = len(state._full_schema)
-            note = (
-                f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
-                if state._lazy_mode
-                else f"Loaded all {count} tools on connect."
-            )
-            return {
-                "connected": True,
-                "transport": "uds",
-                "project": installed.connected_project,
-                "socket": match["socket"],
-                "pid": match.get("pid"),
-                "tools_registered": count,
-                "tools_total": total,
-                "loaded_groups": sorted(state._loaded_groups),
-                "note": note,
-            }
-
-    env_tcp = os.getenv("GHIDRA_MCP_URL")
-    if env_tcp:
-        tcp_url = env_tcp
-    elif matched_tcp_url:
-        tcp_url = matched_tcp_url
-    elif match is None and instances and any(inst.get("project") for inst in instances):
-        available = [inst.get("project", "unknown") for inst in instances]
-        return {
-            "error": (
-                f"No instance matching '{project}' (UDS: {len(instances)} found, "
-                f"none matched). Refusing to use any instance's tcp_port - would "
-                f"connect to the wrong project. Use list_instances() to see what's "
-                f"available."
-            ),
-            "available": available,
-        }
-    else:
-        scanned = discovery._scan_tcp_for_project(project)
-        tcp_url = scanned if scanned else DEFAULT_TCP_URL
-    if not validate_server_url(tcp_url):
-        return {
-            "error": f"Refusing to connect to invalid TCP URL: {tcp_url}. Expected http://<127.0.0.1|localhost|::1>:<port> (http scheme and an explicit port are required)."
-        }
-
-    candidate = state.build_connection_snapshot(
-        mode="tcp",
-        active_tcp=tcp_url,
-        connected_project=match.get("project") if match else None,
-    )
-    try:
-        schema = registry._fetch_schema(connection=candidate)
-    except Exception as e:
-        available = [inst.get("project", "unknown") for inst in instances]
-        return {
-            "error": f"No instance matching '{project}' (UDS: {len(instances)} found, TCP {tcp_url}: {e})",
-            "available": available,
-        }
-    if cancel_handle is not None and cancel_handle.aborted:
-        return {"error": "connect_instance cancelled before commit"}
-
-    with state._tool_registry_lock:
-        result = _commit_if_live(
-            lambda: (
-                registry.register_tools_from_schema(
-                    schema,
-                    groups=None if not state._lazy_mode else state._default_groups,
-                ),
-                state.set_connection_snapshot(
-                    "tcp",
-                    active_socket=None,
-                    active_tcp=tcp_url,
-                    connected_project=match.get("project") if match else None,
-                ),
-            )
-        )
-        if result is None:
-            return {"error": "connect_instance cancelled before commit"}
-        count, _installed = result
-
-    total = len(state._full_schema)
-    note = (
-        f"Loaded {count}/{total} tools (default groups). Use load_tool_group() for more."
-        if state._lazy_mode
-        else f"Loaded all {count} tools on connect."
-    )
-    return {
-        "connected": True,
-        "transport": "tcp",
-        "url": tcp_url,
-        "tools_registered": count,
-        "tools_total": total,
-        "loaded_groups": sorted(state._loaded_groups),
-        "note": note,
-    }
 
 
 def _list_instances_sync() -> str:
@@ -196,14 +44,6 @@ def _list_instances_sync() -> str:
 
     return json.dumps({"instances": [_summarize_instance(i) for i in instances]}, indent=2)
 
-
-def _load_groups_sync(group_names: list[str]) -> list[str]:
-    loaded: list[str] = []
-    for name in group_names:
-        loaded.extend(registry._load_group(name))
-    return loaded
-
-
 @mcp.tool(name="list_instances")
 async def _list_instances_tool() -> str:
     return await state.run_in_worker(_list_instances_sync)
@@ -211,6 +51,85 @@ async def _list_instances_tool() -> str:
 
 def list_instances() -> str:
     return _list_instances_sync()
+
+
+
+@mcp.tool()
+async def list_projects(query: str = "", search_dir: str = "") -> str:
+    """List Ghidra projects with stable project_id values for project-scoped calls."""
+    try:
+        result = await state.run_in_worker(project_sessions.list_projects, query, search_dir)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def open_project(project_id: str) -> str:
+    """Ensure that project_id has a dedicated headless worker session."""
+    try:
+        result = await state.run_in_worker(project_sessions.ensure_session, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def close_project(project_id: str) -> str:
+    """Release and close the dedicated headless worker session for project_id."""
+    try:
+        result = await state.run_in_worker(
+            project_sessions.release_project_session,
+            project_id,
+            True,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def project_session_info(project_id: str) -> str:
+    """Return worker/session state for one project_id without changing routing."""
+    try:
+        result = await state.run_in_worker(project_sessions.session_info, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def release_project_session(project_id: str, close_project: bool = True) -> str:
+    """Release an idle project session so its worker can be reused."""
+    try:
+        result = await state.run_in_worker(
+            project_sessions.release_project_session,
+            project_id,
+            close_project,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def create_project(name: str, parent_dir: str = "") -> str:
+    """Create a project through an idle worker and return its stable project_id."""
+    try:
+        result = await state.run_in_worker(project_sessions.create_project, name, parent_dir)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def delete_project(project_id: str) -> str:
+    """Delete a project by stable project_id; refuses while requests are in flight."""
+    try:
+        result = await state.run_in_worker(project_sessions.delete_project, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
 
 
 # A project can hold hundreds of programs; only the open ones are actionable.
@@ -249,32 +168,32 @@ def _summarize_instance(inst: dict) -> dict:
 @mcp.tool()
 async def connect_instance(project: str, ctx: Context | None = None) -> str:
     """
-    Switch the MCP bridge to a different Ghidra instance by project name.
+    Resolve a project selector and ensure its isolated project session is active.
 
-    IMPORTANT: Before calling this function only the static bridge tools are
-    exposed (list_instances, connect_instance, tool-group management,
-    debugger proxy). After a successful connect the bridge fetches the
-    instance's /mcp/schema and registers Ghidra analysis tools dynamically.
-    By default all tool groups are loaded on connect. When started with
-    --lazy, only the default groups are loaded initially and clients may need
-    to call load_tool_group() for additional categories. Clients that cache
-    the initial tools/list and don't honor tools/list_changed must re-list
-    tools after this call.
-
-    Use list_instances() first to see available instances.
-
-    Args:
-        project: Project name (or substring) to connect to
+    This no longer changes process-global routing. The returned project_id must
+    be passed to every project-scoped Ghidra tool.
     """
-    result = await state.run_blocking_ghidra_call(
-        _connect_instance_sync,
-        project,
-        bind_connection=False,
-    )
-    if result.get("connected"):
-        await registry._notify_tools_changed(ctx)
-    return json.dumps(result)
+    try:
+        record = await state.run_in_worker(project_sessions.find_project, project)
+        result = await state.run_in_worker(
+            project_sessions.ensure_session,
+            record.project_id,
+        )
+        result["connected"] = True
+        result["note"] = (
+            "Project session is active. Pass project_id explicitly to every Ghidra tool; "
+            "no global current-project route was changed."
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
 
+
+def _load_groups_sync(group_names: list[str]) -> list[str]:
+    loaded: list[str] = []
+    for name in group_names:
+        loaded.extend(registry._load_group(name))
+    return loaded
 
 @mcp.tool()
 def list_tool_groups() -> str:
@@ -511,6 +430,7 @@ async def search_tools(query: str, limit: int = 15) -> str:
 
 @mcp.tool()
 async def import_file(
+    project_id: str,
     file_path: str,
     project_folder: str = "/",
     language: str | None = None,
@@ -519,22 +439,16 @@ async def import_file(
     ctx: Context | None = None,
 ) -> str:
     """
-    Import a binary file from disk into the current Ghidra project.
+    Import a binary file into the explicitly selected Ghidra project session.
 
-    Imports the file, opens it in the CodeBrowser, and optionally starts auto-analysis.
-    When analysis is enabled, sends a log notification when analysis completes.
-
-    For raw firmware binaries, specify language (e.g. "ARM:LE:32:Cortex") and
-    optionally compiler_spec (e.g. "default"). Without language, Ghidra auto-detects
-    the format (works for ELF, PE, Mach-O, etc.).
-
-    Args:
-        file_path: Absolute path to the binary file on disk
-        project_folder: Destination folder in the Ghidra project (default: "/")
-        language: Language ID for raw binaries (e.g. "ARM:LE:32:Cortex", "x86:LE:64:default")
-        compiler_spec: Compiler spec ID (e.g. "default", "gcc"). Uses language default if omitted.
-        auto_analyze: Start auto-analysis after import (default: true)
+    project_id is mandatory and is obtained from list_projects(). The call is
+    pinned to that project's worker for its entire lifetime.
     """
+    try:
+        lease = await state.run_in_worker(project_sessions.checkout, project_id)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
     payload: dict = {
         "file_path": file_path,
         "project_folder": project_folder,
@@ -545,43 +459,59 @@ async def import_file(
     if compiler_spec:
         payload["compiler_spec"] = compiler_spec
 
-    result = await state.run_blocking_ghidra_call(dispatch.dispatch_post, "/import_file", payload)
-
-    # Parse result to check if analysis was started
+    keep_lease_for_poll = False
     try:
-        data = json.loads(result)
-    except (json.JSONDecodeError, TypeError):
-        return result
+        result = await state.run_blocking_ghidra_call(
+            dispatch.dispatch_post,
+            "/import_file",
+            payload,
+            connection=lease.snapshot,
+        )
 
-    if data.get("data", {}).get("analyzing") and ctx is not None:
-        program_name = data["data"].get("name", "unknown")
-        # Capture the session before the tool call returns
-        session = ctx.request_context.session
+        try:
+            data = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return result
 
-        async def _poll_analysis():
-            """Poll analysis_status until analysis completes, then send log notification."""
-            await asyncio.sleep(5)  # Initial delay
-            for _ in range(360):  # Up to 30 minutes
+        response_data = data.get("data", data) if isinstance(data, dict) else {}
+        if response_data.get("analyzing") and ctx is not None:
+            keep_lease_for_poll = True
+            program_name = response_data.get("name", "unknown")
+            session = ctx.request_context.session
+
+            async def _poll_analysis():
                 try:
-                    status_text = await state.run_blocking_ghidra_call(
-                        dispatch.dispatch_get, "/analysis_status", {"program": program_name}
-                    )
-                    status = json.loads(status_text)
-                    status_data = status.get("data", status)
-                    if not status_data.get("analyzing", True):
-                        fn_count = status_data.get("function_count", "?")
-                        await session.send_log_message(
-                            level="info",
-                            data=f"Analysis complete for {program_name}: {fn_count} functions found",
-                        )
-                        return
-                except Exception as e:
-                    logger.debug(f"Analysis poll error for {program_name}: {e}")
-                await asyncio.sleep(5)
+                    await asyncio.sleep(5)
+                    for _ in range(360):
+                        try:
+                            status_text = await state.run_blocking_ghidra_call(
+                                dispatch.dispatch_get,
+                                "/analysis_status",
+                                {"program": program_name},
+                                connection=lease.snapshot,
+                            )
+                            status = json.loads(status_text)
+                            status_data = status.get("data", status)
+                            if not status_data.get("analyzing", True):
+                                fn_count = status_data.get("function_count", "?")
+                                await session.send_log_message(
+                                    level="info",
+                                    data=f"Analysis complete for {program_name}: {fn_count} functions found",
+                                )
+                                return
+                        except Exception as exc:
+                            logger.debug(f"Analysis poll error for {program_name}: {exc}")
+                        await asyncio.sleep(5)
+                finally:
+                    await state.run_in_worker(project_sessions.release_lease, lease)
 
-        asyncio.create_task(_poll_analysis())
+            asyncio.create_task(_poll_analysis())
 
-    return result
+        return result
+    finally:
+        if not keep_lease_for_poll:
+            await state.run_in_worker(project_sessions.release_lease, lease)
+
 
 
 def _auto_connect() -> bool:

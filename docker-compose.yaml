@@ -12,7 +12,9 @@ services:
       GHIDRA_MCP_PROJECT_ROOT: "/projects"
       GHIDRA_MCP_SCRIPT_ROOT: "/artifacts/scripts"
       GHIDRA_MCP_SCRIPT_CACHE: "/tmp/ghidra-script-cache"
-      JAVA_OPTS: "-Xmx4g -XX:+UseG1GC"
+      GHIDRA_MCP_WORKER_COUNT: "2"
+      GHIDRA_MCP_WORKER_JAVA_OPTS: "-Xmx2300m -XX:+UseG1GC"
+      JAVA_OPTS: "-Xmx2300m -XX:+UseG1GC"
     volumes:
       - /srv/ghidra/data:/data
       - ghidra-projects:/projects
@@ -43,6 +45,9 @@ services:
     restart: unless-stopped
     environment:
       GHIDRA_MCP_URL: "http://ghidra:8089/"
+      GHIDRA_MCP_WORKER_URLS: "http://ghidra:8089,http://ghidra:8090"
+      GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS: "1"
+      GHIDRA_MCP_MAX_CONCURRENT_REQUESTS: "8"
       GHIDRA_MCP_AUTH_TOKEN: "${GHIDRA_MCP_AUTH_TOKEN}"
       GHIDRA_MCP_TRUSTED_HOSTS: "ghidra"
       GHIDRA_MCP_ALLOWED_HOSTS: "ghidra-mcp,bridge,localhost,127.0.0.1"
