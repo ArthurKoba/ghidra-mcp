@@ -26,6 +26,12 @@ public class AgentProjectLifecycleDefaultsTest extends TestCase {
         return null;
     }
 
+    public void testStorageInfoEndpointIsRegistered() {
+        Method storage = tool("getStorageInfo");
+        assertEquals("/get_storage_info", storage.getAnnotation(McpTool.class).path());
+        assertEquals("headless", storage.getAnnotation(McpTool.class).category());
+    }
+
     public void testCreateProjectUsesConfiguredRootWhenParentEmpty() {
         assertEquals("", param(tool("createProject"), "parentDir").defaultValue());
         assertTrue(tool("createProject").getAnnotation(McpTool.class).description()

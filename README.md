@@ -1176,7 +1176,7 @@ The headless Docker deployment separates three concerns:
 - `/app/ghidra_scripts` — built-in, version-controlled scripts copied from this
   repository at image build time.
 
-Local project creation/import/analysis does not depend on Ghidra Server credentials.
+Local project creation/import/analysis does not depend on Ghidra Server credentials. Use `get_storage_info` to verify the configured roots and writeability before staging a new reverse-engineering project.
 Set `GHIDRA_MCP_PROJECT_ROOT=/projects` and `GHIDRA_MCP_FILE_ROOT=/artifacts`.
 Ghidra Server remains optional for collaborative repository/version-control workflows.
 

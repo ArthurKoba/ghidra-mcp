@@ -32,6 +32,42 @@ public class HeadlessManagementService {
     }
 
     // ========================================================================
+    // Storage diagnostics
+    // ========================================================================
+
+
+    @McpTool(path = "/get_storage_info",
+            description = "Report configured artifact/project/script roots and whether they are present and writable. "
+                + "Local project storage is independent from Ghidra Server credentials.",
+            category = "headless")
+    public Response getStorageInfo() {
+        SecurityConfig security = SecurityConfig.getInstance();
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("file_root", storageRootInfo(security.getFileRoot()));
+        info.put("project_root", storageRootInfo(
+            security.getProjectRoot() == null ? DEFAULT_PROJECT_ROOT : security.getProjectRoot()));
+        info.put("script_root", storageRootInfo(security.getScriptRoot()));
+        info.put("local_projects_require_server", false);
+        return Response.ok(info);
+    }
+
+    private static Map<String, Object> storageRootInfo(String path) {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("path", path == null ? "" : path);
+        if (path == null || path.isEmpty()) {
+            info.put("configured", false);
+            info.put("exists", false);
+            info.put("writable", false);
+            return info;
+        }
+        File file = new File(path);
+        info.put("configured", true);
+        info.put("exists", file.isDirectory());
+        info.put("writable", file.isDirectory() && file.canWrite());
+        return info;
+    }
+
+    // ========================================================================
     // Program management
     // ========================================================================
 
