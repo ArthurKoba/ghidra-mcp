@@ -449,6 +449,98 @@ def release_project_session(project_id: str, close_project: bool = True) -> dict
         }
 
 
+
+def _idle_slot_locked() -> WorkerSlot:
+    _reconcile_slots_locked()
+    slot = next(
+        (
+            item
+            for item in _slots.values()
+            if item.project_id is None
+            and item.project_name is None
+            and item.in_flight == 0
+            and item.error is None
+        ),
+        None,
+    )
+    if slot is None:
+        raise ProjectPoolExhaustedError(
+            "No idle Ghidra worker is available. "
+            "Release an unused project session or increase GHIDRA_MCP_WORKER_COUNT. "
+            f"Workers: {_status_locked()}"
+        )
+    return slot
+
+
+def create_project(name: str, parent_dir: str = "") -> dict[str, Any]:
+    name = name.strip()
+    if not name:
+        raise ProjectSessionError("name is required")
+    with _lock:
+        _refresh_catalog_locked(parent_dir)
+        slot = _idle_slot_locked()
+        value = _request(
+            slot.url,
+            "POST",
+            "/create_project",
+            json_data={"name": name, "parentDir": parent_dir},
+            timeout=60,
+        )
+        if not isinstance(value, dict):
+            raise ProjectSessionError("Ghidra create_project returned an invalid payload")
+        path = str(value.get("project_path", "")).strip()
+        if not path:
+            raise ProjectSessionError("Ghidra create_project did not return project_path")
+        record = ProjectRecord(
+            project_id=project_id_for_path(path),
+            name=str(value.get("name", name)).strip() or name,
+            path=posixpath.normpath(path),
+        )
+        _catalog[record.project_id] = record
+        slot.project_id = record.project_id
+        slot.project_name = record.name
+        slot.error = None
+        return {
+            "project_id": record.project_id,
+            "name": record.name,
+            "path": record.path,
+            "session": "active",
+            "worker_index": list(_slots).index(slot.url),
+        }
+
+
+def delete_project(project_id: str) -> dict[str, Any]:
+    with _lock:
+        record = _resolve_project_locked(project_id)
+        _reconcile_slots_locked()
+        slot = next((item for item in _slots.values() if item.project_id == record.project_id), None)
+        if slot is not None:
+            if slot.in_flight:
+                raise ProjectBusyError(
+                    f"Project {record.project_id} has {slot.in_flight} in-flight request(s)"
+                )
+            _request(slot.url, "POST", "/close_project", json_data={}, timeout=30)
+            slot.project_id = None
+            slot.project_name = None
+            slot.error = None
+
+        worker = slot or _idle_slot_locked()
+        _request(
+            worker.url,
+            "POST",
+            "/delete_project",
+            json_data={"projectPath": record.path},
+            timeout=60,
+        )
+        _catalog.pop(record.project_id, None)
+        return {
+            "project_id": record.project_id,
+            "name": record.name,
+            "path": record.path,
+            "deleted": True,
+        }
+
+
 def reset_for_tests() -> None:
     global _configured_urls, _slots, _catalog
     with _lock:
