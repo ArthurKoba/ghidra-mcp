@@ -13,6 +13,7 @@ import os
 import threading
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import sys
@@ -348,8 +349,20 @@ class TestToolRegistrationRoundTrip(unittest.TestCase):
             self.assertTrue(tool.is_async)
             self.assertTrue(inspect.iscoroutinefunction(tool.fn))
 
+            lease = SimpleNamespace(
+                project_id="ghp_test",
+                worker_url="http://127.0.0.1:8089",
+                snapshot=__import__("bridge_mcp_ghidra").state.build_connection_snapshot(
+                    mode="tcp",
+                    active_tcp="http://127.0.0.1:8089",
+                    connected_project="test-project",
+                ),
+            )
+
             async def run_tool():
-                task = asyncio.create_task(tool.fn(address="0x401000"))
+                task = asyncio.create_task(
+                    tool.fn(project_id="ghp_test", address="0x401000")
+                )
                 for _ in range(100):
                     if started.is_set():
                         break
@@ -358,7 +371,11 @@ class TestToolRegistrationRoundTrip(unittest.TestCase):
                 release.set()
                 return await task
 
-            self.assertEqual(asyncio.run(run_tool()), '{"ok": true}')
+            with (
+                patch("bridge_mcp_ghidra.project_sessions.checkout", return_value=lease),
+                patch("bridge_mcp_ghidra.project_sessions.release_lease"),
+            ):
+                self.assertEqual(asyncio.run(run_tool()), '{"ok": true}')
         finally:
             release.set()
             register_tools_from_schema([])
