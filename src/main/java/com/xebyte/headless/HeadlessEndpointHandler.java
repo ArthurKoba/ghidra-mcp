@@ -17,6 +17,7 @@ package com.xebyte.headless;
 
 import com.xebyte.core.BinaryComparisonService;
 import com.xebyte.core.ProgramProvider;
+import com.xebyte.core.SecurityConfig;
 import com.xebyte.core.ServiceUtils;
 import com.xebyte.core.ThreadingStrategy;
 import ghidra.program.model.address.Address;
