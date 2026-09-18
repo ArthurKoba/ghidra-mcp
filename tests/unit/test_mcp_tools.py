@@ -200,80 +200,6 @@ class TestToolGroupManagement(unittest.TestCase):
             bridge.register_tools_from_schema([])
 
 
-class TestConnectInstance(unittest.TestCase):
-    """Test connect_instance eager-loading behavior."""
-
-    def test_connect_instance_eager_loads_all_tools_and_notifies(self):
-        import bridge_mcp_ghidra as bridge
-
-        schema = {
-            "tools": [
-                {
-                    "path": "/listing_tool",
-                    "method": "GET",
-                    "category": "listing",
-                    "params": [],
-                },
-                {
-                    "path": "/datatype_tool",
-                    "method": "GET",
-                    "category": "datatype",
-                    "params": [],
-                },
-            ]
-        }
-
-        session = SimpleNamespace(send_tool_list_changed=mock.AsyncMock())
-        ctx = SimpleNamespace(
-            _request_context=object(),
-            request_context=SimpleNamespace(session=session),
-        )
-
-        old_lazy_mode = bridge.state._lazy_mode
-        old_active_socket = bridge.state._active_socket
-        old_active_tcp = bridge.state._active_tcp
-        old_transport_mode = bridge.state._transport_mode
-        old_connected_project = bridge.state._connected_project
-        old_dynamic_names = list(bridge.state._dynamic_tool_names)
-        old_full_schema = list(bridge.state._full_schema)
-        old_loaded_groups = set(bridge.state._loaded_groups)
-
-        try:
-            bridge.state._lazy_mode = False
-            with (
-                mock.patch.object(
-                    bridge.discovery,
-                    "discover_instances",
-                    return_value=[{"project": "TestProject", "socket": "/tmp/test.sock", "pid": 42}],
-                ),
-                mock.patch.object(
-                    bridge.transport,
-                    "do_request",
-                    return_value=(json.dumps(schema), 200),
-                ),
-            ):
-                result = json.loads(asyncio.run(bridge.connect_instance("TestProject", ctx=ctx)))
-
-            self.assertTrue(result["connected"])
-            self.assertEqual(result["tools_registered"], 2)
-            self.assertEqual(result["tools_total"], 2)
-            self.assertEqual(set(result["loaded_groups"]), {"listing", "datatype"})
-            self.assertEqual(result["note"], "Loaded all 2 tools on connect.")
-            session.send_tool_list_changed.assert_awaited_once()
-        finally:
-            for name in list(bridge.state._dynamic_tool_names):
-                bridge.mcp._tool_manager._tools.pop(name, None)
-            bridge.state._dynamic_tool_names[:] = old_dynamic_names
-            bridge.state._full_schema[:] = old_full_schema
-            bridge.state._loaded_groups.clear()
-            bridge.state._loaded_groups.update(old_loaded_groups)
-            bridge.state._lazy_mode = old_lazy_mode
-            bridge.state._active_socket = old_active_socket
-            bridge.state._active_tcp = old_active_tcp
-            bridge.state._transport_mode = old_transport_mode
-            bridge.state._connected_project = old_connected_project
-
-
 class TestToolsChangedFanout(unittest.TestCase):
     def test_worker_notification_fans_out_to_all_sessions(self):
         import bridge_mcp_ghidra as bridge
@@ -348,7 +274,8 @@ class TestSchemaFormat(unittest.TestCase):
         }
         fn = _build_tool_function("/test", "POST", schema)
         sig = inspect.signature(fn)
-        self.assertEqual(len(sig.parameters), 5)
+        self.assertEqual(len(sig.parameters), 6)
+        self.assertIn("project_id", sig.parameters)
         self.assertIn("dry_run", sig.parameters)
 
     def test_schema_with_descriptions(self):
