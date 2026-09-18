@@ -1662,7 +1662,12 @@ public class HeadlessEndpointHandler {
     // ==========================================================================
 
     public String createProject(String parentDir, String name) {
-        if (parentDir == null || parentDir.isEmpty()) return "{\"error\": \"parentDir required\"}";
+        SecurityConfig security = SecurityConfig.getInstance();
+        String configured = security.getProjectRoot();
+        if (parentDir == null || parentDir.isEmpty()) parentDir = configured != null ? configured : "/projects";
+        java.nio.file.Path resolvedProjectParent = security.resolveWithinProjectRoot(parentDir);
+        if (resolvedProjectParent == null) return "{\"error\": \"path outside configured project root\"}";
+        parentDir = resolvedProjectParent.toString();
         if (name == null || name.isEmpty()) return "{\"error\": \"name required\"}";
         if (!(programProvider instanceof HeadlessProgramProvider)) {
             return "{\"error\": \"Project management not supported in this mode\"}";
@@ -1679,6 +1684,9 @@ public class HeadlessEndpointHandler {
 
     public String deleteProject(String projectPath) {
         if (projectPath == null || projectPath.isEmpty()) return "{\"error\": \"projectPath required\"}";
+        java.nio.file.Path resolvedProjectPath = SecurityConfig.getInstance().resolveWithinProjectRoot(projectPath);
+        if (resolvedProjectPath == null) return "{\"error\": \"path outside configured project root\"}";
+        projectPath = resolvedProjectPath.toString();
         if (!(programProvider instanceof HeadlessProgramProvider)) {
             return "{\"error\": \"Project management not supported in this mode\"}";
         }
@@ -1693,6 +1701,13 @@ public class HeadlessEndpointHandler {
     }
 
     public String listProjects(String searchDir) {
+        SecurityConfig security = SecurityConfig.getInstance();
+        if (searchDir == null || searchDir.isEmpty()) {
+            searchDir = security.getProjectRoot() != null ? security.getProjectRoot() : "/projects";
+        }
+        java.nio.file.Path resolvedSearchDir = security.resolveWithinProjectRoot(searchDir);
+        if (resolvedSearchDir == null) return "{\"error\": \"path outside configured project root\"}";
+        searchDir = resolvedSearchDir.toString();
         if (!(programProvider instanceof HeadlessProgramProvider)) {
             return "{\"error\": \"Project management not supported in this mode\"}";
         }

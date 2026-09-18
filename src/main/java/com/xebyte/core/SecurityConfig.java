@@ -26,6 +26,12 @@ import java.nio.file.Paths;
  *       Without an explicit opt-in they return 403. Scripts endpoints were
  *       always-on before v5.4.1; the flip to default-off is a deliberate
  *       breaking change in the security release.
+ *   <li>{@code GHIDRA_MCP_FILE_ROOT} — artifact/input/output filesystem root.</li>
+ *   <li>{@code GHIDRA_MCP_PROJECT_ROOT} — independent filesystem root for local
+ *       Ghidra .gpr/.rep projects. Project lifecycle does not require a shared
+ *       Ghidra Server.</li>
+ *   <li>{@code GHIDRA_MCP_SCRIPT_ROOT} — optional directory for agent-authored
+ *       scripts. Built-in scripts remain part of the application image.</li>
  *   <li>{@code GHIDRA_MCP_FILE_ROOT} — if set to a directory path, endpoints that take a
  *       real <em>filesystem</em> path canonicalize the input (via
  *       {@link #resolveWithinFileRoot(String)}) and require that the resolved path fall
@@ -78,6 +84,9 @@ public final class SecurityConfig {
     private final boolean scriptsAllowed;
     private final String fileRoot;       // null if disabled
     private final Path fileRootCanonical;
+    private final String projectRoot;     // null if disabled
+    private final Path projectRootCanonical;
+    private final String scriptRoot;      // optional agent-authored script root
     private final String projectFolderScope; // null = no enforcement (default)
 
     private SecurityConfig() {
@@ -106,6 +115,19 @@ public final class SecurityConfig {
             this.fileRoot = null;
             this.fileRootCanonical = null;
         }
+
+        String rawProjectRoot = System.getenv("GHIDRA_MCP_PROJECT_ROOT");
+        if (rawProjectRoot != null && !rawProjectRoot.isEmpty()) {
+            this.projectRoot = rawProjectRoot;
+            this.projectRootCanonical = canonicalPath(rawProjectRoot);
+        } else {
+            this.projectRoot = null;
+            this.projectRootCanonical = null;
+        }
+
+        String rawScriptRoot = System.getenv("GHIDRA_MCP_SCRIPT_ROOT");
+        this.scriptRoot = (rawScriptRoot == null || rawScriptRoot.trim().isEmpty())
+                ? null : rawScriptRoot.trim();
 
         // Project-folder scope guard. When set, FrontEndProgramProvider
         // refuses to return Programs whose DomainFile path falls outside
@@ -211,6 +233,37 @@ public final class SecurityConfig {
         return domainFilePath.startsWith(scopePrefix + "/");
     }
 
+    private static Path canonicalPath(String rawPath) {
+        try {
+            return new File(rawPath).getCanonicalFile().toPath();
+        } catch (IOException e) {
+            return Paths.get(rawPath).toAbsolutePath().normalize();
+        }
+    }
+
+    private static Path resolveWithinRoot(String userPath, Path root) {
+        if (userPath == null) return null;
+        Path requested = canonicalPath(userPath);
+        if (root == null) return requested;
+        return requested.startsWith(root) ? requested : null;
+    }
+
+    public boolean hasProjectRoot() {
+        return projectRoot != null;
+    }
+
+    public String getProjectRoot() {
+        return projectRoot;
+    }
+
+    public Path resolveWithinProjectRoot(String userPath) {
+        return resolveWithinRoot(userPath, projectRootCanonical);
+    }
+
+    public String getScriptRoot() {
+        return scriptRoot;
+    }
+
     /** True when {@code GHIDRA_MCP_FILE_ROOT} is set. */
     public boolean hasFileRoot() {
         return fileRoot != null;
@@ -228,16 +281,7 @@ public final class SecurityConfig {
      */
     public Path resolveWithinFileRoot(String userPath) {
         if (userPath == null) return null;
-        Path requested;
-        try {
-            requested = new File(userPath).getCanonicalFile().toPath();
-        } catch (IOException e) {
-            requested = Paths.get(userPath).toAbsolutePath().normalize();
-        }
-        if (fileRootCanonical == null) {
-            return requested;  // no allow-list configured
-        }
-        return requested.startsWith(fileRootCanonical) ? requested : null;
+        return resolveWithinRoot(userPath, fileRootCanonical);
     }
 
     /**

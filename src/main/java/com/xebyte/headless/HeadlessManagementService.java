@@ -2,6 +2,7 @@ package com.xebyte.headless;
 
 import com.xebyte.core.*;
 import ghidra.program.model.listing.Program;
+import ghidra.framework.model.ProjectLocator;
 import ghidra.util.Msg;
 
 import java.io.File;
@@ -17,6 +18,9 @@ import java.util.Map;
  */
 @McpToolGroup(value = "headless", description = "Headless server program management (no GUI required)")
 public class HeadlessManagementService {
+
+    private static final String DEFAULT_PROJECT_ROOT = "/projects";
+    private static final String DEFAULT_EXPORT_ROOT = "/artifacts/exports";
 
     private final HeadlessProgramProvider programProvider;
     private final GhidraServerManager serverManager;
@@ -118,24 +122,42 @@ public class HeadlessManagementService {
     // Project management
     // ========================================================================
 
-    @McpTool(path = "/create_project", method = "POST", description = "Create a new Ghidra project", category = "headless")
+    @McpTool(path = "/create_project", method = "POST",
+            description = "Create and open a local Ghidra project. Shared Ghidra Server credentials are not required.",
+            category = "headless")
     public Response createProject(
-            @Param(value = "parentDir", source = ParamSource.BODY) String parentDir,
-            @Param(value = "name", source = ParamSource.BODY) String name) {
-        if (parentDir == null || parentDir.isEmpty()) return Response.err("parentDir required");
+            @Param(value = "parentDir", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional project parent. Empty uses GHIDRA_MCP_PROJECT_ROOT (/projects in Docker).") String parentDir,
+            @Param(value = "name", source = ParamSource.BODY, description = "Plain project name.") String name) {
         if (name == null || name.isEmpty()) return Response.err("name required");
-        File parent = resolveWithinRootOrLog(parentDir, "/create_project");
-        if (parent == null) return Response.err(FILE_ROOT_DENY);
-        parentDir = parent.getPath();
+        String invalid = HeadlessPaths.validateFilename(name);
+        if (invalid != null) return Response.err("invalid project name: " + invalid);
+
+        SecurityConfig security = SecurityConfig.getInstance();
+        String configuredRoot = security.getProjectRoot();
+        String requested = (parentDir == null || parentDir.isEmpty())
+                ? (configuredRoot == null ? DEFAULT_PROJECT_ROOT : configuredRoot)
+                : parentDir;
+        Path resolved = security.resolveWithinProjectRoot(requested);
+        if (resolved == null) return Response.err("Access denied: path is outside the configured project root");
+        File parent = resolved.toFile();
+        if (!parent.exists() && !parent.mkdirs() && !parent.isDirectory()) {
+            return Response.err("Could not create project parent: " + parent.getAbsolutePath());
+        }
+        if (!parent.isDirectory() || !parent.canWrite()) {
+            return Response.err("Project parent is not a writable directory: " + parent.getAbsolutePath());
+        }
+
         try {
-            boolean ok = programProvider.createProject(parentDir, name);
-            if (ok) {
-                return Response.ok(JsonHelper.mapOf(
-                    "success", true,
-                    "name", name,
-                    "path", parentDir + "/" + name));
-            }
-            return Response.err("Failed to create project");
+            boolean ok = programProvider.createProject(parent.getAbsolutePath(), name);
+            if (!ok) return Response.err("Failed to create project");
+            ProjectLocator locator = new ProjectLocator(parent.getAbsolutePath(), name);
+            return Response.ok(JsonHelper.mapOf(
+                "success", true,
+                "name", name,
+                "project_path", locator.getMarkerFile().getAbsolutePath(),
+                "project_storage_dir", locator.getProjectDir().getAbsolutePath(),
+                "server_required", false));
         } catch (Exception e) {
             return Response.err(e.getMessage());
         }
@@ -147,6 +169,12 @@ public class HeadlessManagementService {
         if (projectPath == null || projectPath.isEmpty()) {
             return Response.err("Project path required");
         }
+        SecurityConfig security = SecurityConfig.getInstance();
+        Path resolvedProject = security.resolveWithinProjectRoot(projectPath);
+        if (resolvedProject == null) {
+            return Response.err("Access denied: path is outside the configured project root");
+        }
+        projectPath = resolvedProject.toString();
         boolean success = programProvider.openProject(projectPath);
         if (success) {
             return Response.ok(JsonHelper.mapOf("success", true, "project", programProvider.getProjectName()));
@@ -263,20 +291,20 @@ public class HeadlessManagementService {
                 + "can be imported into any Ghidra GUI (File \u2192 Import) or back into a project via "
                 + "/import_program. Resolution order: (1) the in-memory program with that name (captures live "
                 + "analyst edits); (2) a DomainFile in the open project (on-disk state). Output is written to "
-                + "`output_dir/output_name` (defaults: /data/exports and `<program>.gzf`). Refuses to overwrite "
+                + "`output_dir/output_name` (defaults: /artifacts/exports and `<program>.gzf`). Refuses to overwrite "
                 + "an existing file.",
             category = "headless")
     public Response exportProgram(
             @Param(value = "program_name", source = ParamSource.BODY,
                 description = "Program name or project path (e.g. 'myprog' or '/myprog').") String programName,
-            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/data/exports",
+            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/artifacts/exports",
                 description = "Directory the .gzf will be written to. Must already exist.") String outputDir,
             @Param(value = "output_name", source = ParamSource.BODY, defaultValue = "",
                 description = "Output file name. Defaults to `<program>.gzf`. `.gzf` is appended if missing.") String outputName) {
         if (programName == null || programName.isEmpty()) {
             return Response.err("program_name required");
         }
-        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
+        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/artifacts/exports" : outputDir;
         File dir = resolveWithinRootOrLog(dirPath, "/export_program");
         if (dir == null) return Response.err(FILE_ROOT_DENY);
         if (!dir.isDirectory()) {
@@ -357,16 +385,16 @@ public class HeadlessManagementService {
                 + "restored into any Ghidra GUI via File \u2192 Restore Project, or back into a headless instance "
                 + "via /restore_project. Captures the entire project (all programs, folders, settings, "
                 + "version-control metadata) \u2014 unlike /export_program which ships a single program as .gzf. "
-                + "Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). "
+                + "Output is written to `output_dir/output_name` (defaults: /artifacts/exports and `<project>.gar`). "
                 + "Refuses to overwrite an existing file. Callers should /save_all_programs first to flush "
                 + "pending in-memory edits.",
             category = "headless")
     public Response archiveProject(
-            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/data/exports",
+            @Param(value = "output_dir", source = ParamSource.BODY, defaultValue = "/artifacts/exports",
                 description = "Directory the .gar will be written to. Must already exist.") String outputDir,
             @Param(value = "output_name", source = ParamSource.BODY, defaultValue = "",
                 description = "Output file name. Defaults to `<project>.gar`. `.gar` is appended if missing.") String outputName) {
-        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/data/exports" : outputDir;
+        String dirPath = (outputDir == null || outputDir.isEmpty()) ? "/artifacts/exports" : outputDir;
         File dir = resolveWithinRootOrLog(dirPath, "/archive_project");
         if (dir == null) return Response.err(FILE_ROOT_DENY);
         if (!dir.isDirectory()) {
@@ -413,24 +441,43 @@ public class HeadlessManagementService {
     public Response restoreProject(
             @Param(value = "gar_path", source = ParamSource.BODY,
                 description = "Absolute path to the .gar file on disk.") String garPath,
-            @Param(value = "parent_dir", source = ParamSource.BODY, defaultValue = "/data/ghidra_projects",
-                description = "Directory under which the new project (project_name.gpr + project_name.rep/) will be created.") String parentDir,
+            @Param(value = "parent_dir", source = ParamSource.BODY, defaultValue = "",
+                description = "Project parent; empty uses GHIDRA_MCP_PROJECT_ROOT (/projects in Docker).") String parentDir,
             @Param(value = "project_name", source = ParamSource.BODY,
                 description = "Name of the new project to create from the archive.") String projectName) {
         if (garPath == null || garPath.isEmpty()) {
             return Response.err("gar_path required");
         }
-        File gar = new File(garPath);
+        File gar = resolveWithinRootOrLog(garPath, "/restore_project");
+        if (gar == null) return Response.err(FILE_ROOT_DENY);
+        String invalid = HeadlessPaths.validateFilename(projectName);
+        if (invalid != null) return Response.err("invalid project_name: " + invalid);
+
+        SecurityConfig security = SecurityConfig.getInstance();
+        String configuredRoot = security.getProjectRoot();
+        String requestedParent = (parentDir == null || parentDir.isEmpty())
+                ? (configuredRoot == null ? DEFAULT_PROJECT_ROOT : configuredRoot)
+                : parentDir;
+        Path resolvedParent = security.resolveWithinProjectRoot(requestedParent);
+        if (resolvedParent == null) {
+            return Response.err("Access denied: parent_dir is outside the configured project root");
+        }
+        File projectParent = resolvedParent.toFile();
+        if (!projectParent.exists() && !projectParent.mkdirs() && !projectParent.isDirectory()) {
+            return Response.err("Could not create parent_dir: " + projectParent.getAbsolutePath());
+        }
 
         HeadlessProgramProvider.RestoreResult res =
-            programProvider.restoreProject(gar, parentDir, projectName);
+            programProvider.restoreProject(gar, projectParent.getAbsolutePath(), projectName);
         if (!res.success) {
             return Response.err(res.error);
         }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("success", true);
+        ProjectLocator locator = new ProjectLocator(projectParent.getAbsolutePath(), projectName);
         body.put("project", res.projectName);
-        body.put("project_dir", res.projectDir);
+        body.put("project_path", locator.getMarkerFile().getAbsolutePath());
+        body.put("project_storage_dir", res.projectDir);
         return Response.ok(body);
     }
 

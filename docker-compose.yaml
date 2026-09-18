@@ -8,14 +8,19 @@ services:
       GHIDRA_MCP_PORT: "8089"
       GHIDRA_MCP_AUTH_TOKEN: "${GHIDRA_MCP_AUTH_TOKEN}"
       GHIDRA_MCP_ALLOW_SCRIPTS: "1"
-      GHIDRA_MCP_FILE_ROOT: "/workspace"
+      GHIDRA_MCP_FILE_ROOT: "/artifacts"
+      GHIDRA_MCP_PROJECT_ROOT: "/projects"
+      GHIDRA_MCP_SCRIPT_ROOT: "/artifacts/scripts"
+      GHIDRA_MCP_SCRIPT_CACHE: "/tmp/ghidra-script-cache"
       JAVA_OPTS: "-Xmx4g -XX:+UseG1GC"
     volumes:
       - /srv/ghidra/data:/data
+      - ghidra-projects:/projects
+      - koba-artifacts:/artifacts
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/projects:/projects/anjia-ajl33pq0866-fh8626v100
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/workspace:/workspace/anjia-ajl33pq0866-fh8626v100/workspace
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/evidence:/workspace/anjia-ajl33pq0866-fh8626v100/evidence:ro
-      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/scripts:/home/ubuntu/ghidra_scripts
+      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/scripts:/artifacts/legacy/anjia-ajl33pq0866-fh8626v100/scripts:ro
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/exports:/workspace/anjia-ajl33pq0866-fh8626v100/exports
     mem_limit: 6g
     cpus: 4
@@ -48,6 +53,12 @@ services:
       coolify:
         aliases:
           - ghidra-mcp
+
+volumes:
+  ghidra-projects:
+    name: ghidra-projects
+  koba-artifacts:
+    name: koba-artifacts
 
 networks:
   coolify:

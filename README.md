@@ -1166,6 +1166,25 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\path\to\ghidra_12.1.
 - [Complete Changelog](CHANGELOG.md) - All version release notes
 - [Release Notes](docs/releases/) - Detailed release documentation
 
+## Agent reverse-engineering storage model
+
+The headless Docker deployment separates three concerns:
+
+- `/artifacts` — shared inputs/outputs owned by Koba MCP Bridge
+  (`inbox/`, `exports/`, `scripts/`);
+- `/projects` — persistent local Ghidra projects (`.gpr` + `.rep`);
+- `/app/ghidra_scripts` — built-in, version-controlled scripts copied from this
+  repository at image build time.
+
+Local project creation/import/analysis does not depend on Ghidra Server credentials.
+Set `GHIDRA_MCP_PROJECT_ROOT=/projects` and `GHIDRA_MCP_FILE_ROOT=/artifacts`.
+Ghidra Server remains optional for collaborative repository/version-control workflows.
+
+Agent-authored one-off Java scripts live under `/artifacts/scripts` and are selected
+through `GHIDRA_MCP_SCRIPT_ROOT`. Ghidra may use the ephemeral
+`/tmp/ghidra-script-cache` while compiling/executing a script; no persistent script
+volume is mounted into `$HOME`.
+
 ## 🐳 Headless Server (Docker)
 
 GhidraMCP includes a headless server mode for automated analysis without the Ghidra GUI.

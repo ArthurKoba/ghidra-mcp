@@ -117,11 +117,12 @@ ENV GHIDRA_MCP_PORT=8089
 ENV JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
 
 # Create directories
-RUN mkdir -p /app /data /projects
+RUN mkdir -p /app /data /projects /artifacts/inbox /artifacts/exports /artifacts/scripts /tmp/ghidra-script-cache
 
 # Copy the built headless JAR (lib directory may not exist with system-scoped deps)
 # Copy the built JAR (naming may vary based on version)
 COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
+COPY ghidra_scripts /app/ghidra_scripts
 
 # Copy entrypoint script and fix line endings (Windows -> Unix)
 COPY docker/entrypoint.sh /app/
@@ -131,7 +132,7 @@ RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 # so do not create a named account at a fixed numeric id. The deployment bind
 # mounts are owned by 1000:1000; run with those numeric ids directly.
 RUN mkdir -p /home/ghidra \
-    && chown -R 1000:1000 /app /data /projects /home/ghidra
+    && chown -R 1000:1000 /app /data /projects /artifacts /home/ghidra /tmp/ghidra-script-cache
 ENV HOME=/home/ghidra
 USER 1000:1000
 
@@ -139,7 +140,7 @@ USER 1000:1000
 EXPOSE 8089
 
 # Volume for persistent data and projects
-VOLUME ["/data", "/projects"]
+VOLUME ["/data", "/projects", "/artifacts"]
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
