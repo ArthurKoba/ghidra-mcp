@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 254,
+  "total_endpoints": 258,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -258,6 +258,46 @@
         "output_name"
       ],
       "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File â†’ Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) â€” unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+    },
+    {
+      "path": "/artifact_stage_begin",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "name",
+        "size_bytes",
+        "sha256"
+      ],
+      "description": "Begin an internal chunked artifact transfer into Ghidra-local staging. This is intended for trusted orchestrators; callers should import the returned staged path and then cancel the stage to delete temporary bytes."
+    },
+    {
+      "path": "/artifact_stage_cancel",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "stage_id"
+      ],
+      "description": "Delete one internal artifact stage and all of its temporary bytes."
+    },
+    {
+      "path": "/artifact_stage_finish",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "stage_id"
+      ],
+      "description": "Verify size/SHA-256 and commit an internal artifact stage. Returns the Ghidra-local filesystem path for immediate import."
+    },
+    {
+      "path": "/artifact_stage_write",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "stage_id",
+        "offset",
+        "data_base64"
+      ],
+      "description": "Append one base64-encoded binary chunk at the exact next offset of an internal artifact stage."
     },
     {
       "path": "/audit_global",
@@ -1470,6 +1510,13 @@
       "description": "Read the value stored at an address in a property map. Returns has_value=false and a null value when the address holds no property."
     },
     {
+      "path": "/get_storage_info",
+      "method": "GET",
+      "category": "headless",
+      "params": [],
+      "description": "Report configured artifact/project/script roots and whether they are present and writable. Local project storage is independent from Ghidra Server credentials."
+    },
+    {
       "path": "/get_struct_layout",
       "method": "GET",
       "category": "getter",
@@ -1498,13 +1545,6 @@
         "program"
       ],
       "description": "Get valid data type names"
-    },
-    {
-      "path": "/get_storage_info",
-      "method": "GET",
-      "category": "headless",
-      "params": [],
-      "description": "Report configured artifact/project/script roots and whether they are present and writable. Local project storage is independent from Ghidra Server credentials."
     },
     {
       "path": "/get_version",

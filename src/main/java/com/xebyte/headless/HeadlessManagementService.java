@@ -24,11 +24,19 @@ public class HeadlessManagementService {
 
     private final HeadlessProgramProvider programProvider;
     private final GhidraServerManager serverManager;
+    private final ArtifactStageStore artifactStageStore;
 
     public HeadlessManagementService(HeadlessProgramProvider programProvider,
                                      GhidraServerManager serverManager) {
         this.programProvider = programProvider;
         this.serverManager = serverManager;
+        ArtifactStageStore stageStore = null;
+        try {
+            stageStore = ArtifactStageStore.fromSecurityConfig();
+        } catch (Exception e) {
+            Msg.warn(this, "Artifact staging unavailable: " + e.getMessage());
+        }
+        this.artifactStageStore = stageStore;
     }
 
     // ========================================================================
@@ -65,6 +73,76 @@ public class HeadlessManagementService {
         info.put("exists", file.isDirectory());
         info.put("writable", file.isDirectory() && file.canWrite());
         return info;
+    }
+
+    // ========================================================================
+    // Internal artifact staging
+    // ========================================================================
+
+    private ArtifactStageStore requireArtifactStageStore() {
+        if (artifactStageStore == null) {
+            throw new IllegalStateException(
+                "artifact staging unavailable; configure GHIDRA_MCP_FILE_ROOT");
+        }
+        return artifactStageStore;
+    }
+
+    @McpTool(path = "/artifact_stage_begin", method = "POST",
+            description = "Begin an internal chunked artifact transfer into Ghidra-local staging. "
+                + "This is intended for trusted orchestrators; callers should import the returned "
+                + "staged path and then cancel the stage to delete temporary bytes.",
+            category = "headless")
+    public Response artifactStageBegin(
+            @Param(value = "name", source = ParamSource.BODY,
+                description = "Plain artifact filename used as the staged basename.") String name,
+            @Param(value = "size_bytes", source = ParamSource.BODY,
+                description = "Exact artifact size in bytes.") long sizeBytes,
+            @Param(value = "sha256", source = ParamSource.BODY, defaultValue = "",
+                description = "Optional expected SHA-256 digest.") String sha256) {
+        try {
+            return Response.ok(requireArtifactStageStore().begin(name, sizeBytes, sha256));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/artifact_stage_write", method = "POST",
+            description = "Append one base64-encoded binary chunk at the exact next offset of an internal artifact stage.",
+            category = "headless")
+    public Response artifactStageWrite(
+            @Param(value = "stage_id", source = ParamSource.BODY) String stageId,
+            @Param(value = "offset", source = ParamSource.BODY) long offset,
+            @Param(value = "data_base64", source = ParamSource.BODY) String dataBase64) {
+        try {
+            return Response.ok(requireArtifactStageStore().write(stageId, offset, dataBase64));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/artifact_stage_finish", method = "POST",
+            description = "Verify size/SHA-256 and commit an internal artifact stage. "
+                + "Returns the Ghidra-local filesystem path for immediate import.",
+            category = "headless")
+    public Response artifactStageFinish(
+            @Param(value = "stage_id", source = ParamSource.BODY) String stageId) {
+        try {
+            return Response.ok(requireArtifactStageStore().finish(stageId));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
+    @McpTool(path = "/artifact_stage_cancel", method = "POST",
+            description = "Delete one internal artifact stage and all of its temporary bytes.",
+            category = "headless")
+    public Response artifactStageCancel(
+            @Param(value = "stage_id", source = ParamSource.BODY) String stageId) {
+        try {
+            return Response.ok(requireArtifactStageStore().cancel(stageId));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
     }
 
     // ========================================================================
