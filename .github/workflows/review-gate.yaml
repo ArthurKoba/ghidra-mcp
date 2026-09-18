@@ -1,0 +1,48 @@
+name: Reviewer Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  reviewer-approval:
+    if: ${{ github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require current-head approval from Koba AI Reviewer
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const reviewer = 'koba-ai-reviewer[bot]';
+            const headSha = context.payload.pull_request.head.sha;
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+
+            const decisive = reviews
+              .filter(r => r.user?.login === reviewer)
+              .filter(r => ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(r.state))
+              .sort((a, b) => new Date(a.submitted_at) - new Date(b.submitted_at));
+
+            const latest = decisive.at(-1);
+            if (!latest || latest.state !== 'APPROVED') {
+              core.setFailed('Koba AI Reviewer has not approved the current PR state.');
+              return;
+            }
+
+            if (latest.commit_id !== headSha) {
+              core.setFailed(`Reviewer approval is stale: approved ${latest.commit_id}, current head is ${headSha}.`);
+              return;
+            }
+
+            core.info(`Koba AI Reviewer approved current head ${headSha}.`);
