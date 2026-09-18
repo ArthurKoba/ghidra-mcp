@@ -961,11 +961,18 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge also proxies 22 `debugger_*` WinDbg tools when `GHIDRA_DEBUGGER_URL` points at the standalone debugger server.
 
 - `check_tools` - Report which tools are currently registered and callable
-- `connect_instance` - Connect the bridge to a specific Ghidra instance
-- `import_file` - Import a binary from disk into the current project and open it
+- `close_project` - Close and release the worker session for project_id
+- `connect_instance` - Resolve a project selector and activate its isolated worker session
+- `create_project` - Create a local project and return its stable project_id
+- `delete_project` - Delete a project by stable project_id
+- `import_file` - Import a binary into an explicit project_id session
 - `list_instances` - Discover running Ghidra MCP instances (UDS + TCP port scan)
+- `list_projects` - List projects with stable project_id values and session state
 - `list_tool_groups` - List tool groups and their load state
 - `load_tool_group` - Register a tool group's dynamic tools with the MCP client
+- `open_project` - Activate an isolated worker session for project_id
+- `project_session_info` - Inspect worker/session state for one project_id
+- `release_project_session` - Release an idle project worker session
 - `search_tools` - Search the full tool catalog by keyword
 - `unload_tool_group` - Unregister a tool group's dynamic tools
 
