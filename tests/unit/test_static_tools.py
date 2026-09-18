@@ -572,7 +572,7 @@ class TestImportFile(unittest.TestCase):
             project_lease(bridge),
             patch.object(bridge.dispatch, "dispatch_post", return_value='{"data": {}}') as post,
         ):
-            asyncio.run(bridge.import_file(r"C:\bins\game.exe"))
+            asyncio.run(bridge.import_file("ghp_test", r"C:\bins\game.exe"))
 
         post.assert_called_once_with(
             "/import_file",
