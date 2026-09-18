@@ -8,6 +8,7 @@ import time
 
 from . import discovery
 from . import dispatch
+from . import project_sessions
 from . import registry
 from . import state
 from . import transport
@@ -213,6 +214,85 @@ def list_instances() -> str:
     return _list_instances_sync()
 
 
+
+@mcp.tool()
+async def list_projects(query: str = "", search_dir: str = "") -> str:
+    """List Ghidra projects with stable project_id values for project-scoped calls."""
+    try:
+        result = await state.run_in_worker(project_sessions.list_projects, query, search_dir)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def open_project(project_id: str) -> str:
+    """Ensure that project_id has a dedicated headless worker session."""
+    try:
+        result = await state.run_in_worker(project_sessions.ensure_session, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def close_project(project_id: str) -> str:
+    """Release and close the dedicated headless worker session for project_id."""
+    try:
+        result = await state.run_in_worker(
+            project_sessions.release_project_session,
+            project_id,
+            True,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def project_session_info(project_id: str) -> str:
+    """Return worker/session state for one project_id without changing routing."""
+    try:
+        result = await state.run_in_worker(project_sessions.session_info, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def release_project_session(project_id: str, close_project: bool = True) -> str:
+    """Release an idle project session so its worker can be reused."""
+    try:
+        result = await state.run_in_worker(
+            project_sessions.release_project_session,
+            project_id,
+            close_project,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def create_project(name: str, parent_dir: str = "") -> str:
+    """Create a project through an idle worker and return its stable project_id."""
+    try:
+        result = await state.run_in_worker(project_sessions.create_project, name, parent_dir)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def delete_project(project_id: str) -> str:
+    """Delete a project by stable project_id; refuses while requests are in flight."""
+    try:
+        result = await state.run_in_worker(project_sessions.delete_project, project_id)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
 # A project can hold hundreds of programs; only the open ones are actionable.
 MAX_OPEN_PROGRAMS_LISTED = 25
 
@@ -249,31 +329,25 @@ def _summarize_instance(inst: dict) -> dict:
 @mcp.tool()
 async def connect_instance(project: str, ctx: Context | None = None) -> str:
     """
-    Switch the MCP bridge to a different Ghidra instance by project name.
+    Resolve a project selector and ensure its isolated project session is active.
 
-    IMPORTANT: Before calling this function only the static bridge tools are
-    exposed (list_instances, connect_instance, tool-group management,
-    debugger proxy). After a successful connect the bridge fetches the
-    instance's /mcp/schema and registers Ghidra analysis tools dynamically.
-    By default all tool groups are loaded on connect. When started with
-    --lazy, only the default groups are loaded initially and clients may need
-    to call load_tool_group() for additional categories. Clients that cache
-    the initial tools/list and don't honor tools/list_changed must re-list
-    tools after this call.
-
-    Use list_instances() first to see available instances.
-
-    Args:
-        project: Project name (or substring) to connect to
+    This no longer changes process-global routing. The returned project_id must
+    be passed to every project-scoped Ghidra tool.
     """
-    result = await state.run_blocking_ghidra_call(
-        _connect_instance_sync,
-        project,
-        bind_connection=False,
-    )
-    if result.get("connected"):
-        await registry._notify_tools_changed(ctx)
-    return json.dumps(result)
+    try:
+        record = await state.run_in_worker(project_sessions.find_project, project)
+        result = await state.run_in_worker(
+            project_sessions.ensure_session,
+            record.project_id,
+        )
+        result["connected"] = True
+        result["note"] = (
+            "Project session is active. Pass project_id explicitly to every Ghidra tool; "
+            "no global current-project route was changed."
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
 
 
 @mcp.tool()
