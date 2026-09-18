@@ -26,14 +26,8 @@ import java.nio.file.Paths;
  *       Without an explicit opt-in they return 403. Scripts endpoints were
  *       always-on before v5.4.1; the flip to default-off is a deliberate
  *       breaking change in the security release.
- *   <li>{@code GHIDRA_MCP_FILE_ROOT} — artifact/input/output filesystem root.</li>
- *   <li>{@code GHIDRA_MCP_PROJECT_ROOT} — independent filesystem root for local
- *       Ghidra .gpr/.rep projects. Project lifecycle does not require a shared
- *       Ghidra Server.</li>
- *   <li>{@code GHIDRA_MCP_SCRIPT_ROOT} — optional directory for agent-authored
- *       scripts. Built-in scripts remain part of the application image.</li>
- *   <li>{@code GHIDRA_MCP_FILE_ROOT} — if set to a directory path, endpoints that take a
- *       real <em>filesystem</em> path canonicalize the input (via
+ *   <li>{@code GHIDRA_MCP_FILE_ROOT} — artifact/input/output filesystem root.
+ *       Endpoints that take a real <em>filesystem</em> path canonicalize the input (via
  *       {@link #resolveWithinFileRoot(String)}) and require that the resolved path fall
  *       under this root, preventing path traversal. This applies to {@code /import_file}
  *       (and the headless import path). When unset, paths are accepted as-is (pre-v5.4.1
@@ -44,6 +38,11 @@ import java.nio.file.Paths;
  *       analogous containment guard is project-folder scope
  *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
  *       scope is configured.</li>
+ *   <li>{@code GHIDRA_MCP_PROJECT_ROOT} — independent filesystem root for local
+ *       Ghidra .gpr/.rep projects. Project lifecycle does not require a shared
+ *       Ghidra Server.</li>
+ *   <li>{@code GHIDRA_MCP_SCRIPT_ROOT} — optional directory for agent-authored
+ *       scripts. Built-in scripts remain part of the application image.</li>
  * </ul>
  *
  * Also enforces a bind-hardening rule at headless startup:

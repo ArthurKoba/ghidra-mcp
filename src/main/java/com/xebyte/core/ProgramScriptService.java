@@ -2413,7 +2413,7 @@ public class ProgramScriptService {
                         return;
                     }
 
-                    // Issue #2 fix: If the script is NOT already in ~/ghidra_scripts/,
+                    // Issue #2 fix: If the script is NOT already in the ephemeral script cache/,
                     // copy it there so Ghidra's OSGi class loader can find the source bundle.
                     File scriptFileForExecution = resolvedFile;
                     try {
@@ -2421,7 +2421,7 @@ public class ProgramScriptService {
                         String canonicalScriptsDir = ghidraScriptsDir.getCanonicalPath();
                         String canonicalResolved = resolvedFile.getCanonicalPath();
                         if (!canonicalResolved.startsWith(canonicalScriptsDir + File.separator)) {
-                            // Copy to ~/ghidra_scripts/
+                            // Copy to the ephemeral script cache/
                             File dest = new File(ghidraScriptsDir, resolvedFile.getName());
                             java.nio.file.Files.copy(resolvedFile.toPath(), dest.toPath(),
                                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
@@ -2430,7 +2430,7 @@ public class ProgramScriptService {
                             resultMsg.append("Copied to: ").append(dest.getAbsolutePath()).append("\n");
                         }
                     } catch (Exception e) {
-                        resultMsg.append("Warning: Could not copy script to ~/ghidra_scripts/: ").append(e.getMessage()).append("\n");
+                        resultMsg.append("Warning: Could not copy script to the ephemeral script cache/: ").append(e.getMessage()).append("\n");
                     }
 
                     try {
@@ -2616,7 +2616,7 @@ public class ProgramScriptService {
             className = m.group(1);
         }
 
-        // Write to ~/ghidra_scripts/ so OSGi classloader can find the source bundle
+        // Write to the ephemeral script cache/ so OSGi classloader can find the source bundle
         File scriptsDir = new File(System.getenv().getOrDefault("GHIDRA_MCP_SCRIPT_CACHE", "/tmp/ghidra-script-cache"));
         scriptsDir.mkdirs();
 
@@ -2745,7 +2745,7 @@ public class ProgramScriptService {
                         ),
                         "common_script_locations", List.of(
                             "<ghidra_install>/Ghidra/Features/*/ghidra_scripts/",
-                            "<user_home>/ghidra_scripts/"
+                            "<configured_script_root>/"
                         )
                     ));
                 } catch (Exception e) {

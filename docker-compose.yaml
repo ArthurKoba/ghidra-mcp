@@ -18,10 +18,10 @@ services:
       - ghidra-projects:/projects
       - koba-artifacts:/artifacts
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/projects:/projects/anjia-ajl33pq0866-fh8626v100
-      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/workspace:/workspace/anjia-ajl33pq0866-fh8626v100/workspace
-      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/evidence:/workspace/anjia-ajl33pq0866-fh8626v100/evidence:ro
+      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/workspace:/artifacts/legacy/anjia-ajl33pq0866-fh8626v100/workspace
+      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/evidence:/artifacts/legacy/anjia-ajl33pq0866-fh8626v100/evidence:ro
       - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/scripts:/artifacts/legacy/anjia-ajl33pq0866-fh8626v100/scripts:ro
-      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/exports:/workspace/anjia-ajl33pq0866-fh8626v100/exports
+      - /srv/ghidra/anjia-ajl33pq0866-fh8626v100/exports:/artifacts/legacy/anjia-ajl33pq0866-fh8626v100/exports
     mem_limit: 6g
     cpus: 4
     pids_limit: 512
