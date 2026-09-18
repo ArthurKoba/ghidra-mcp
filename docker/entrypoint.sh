@@ -74,38 +74,14 @@ if [ -d "/app/lib" ]; then
     done
 fi
 
-# Handle graceful shutdown
-cleanup() {
-    echo ""
-    echo -e "${YELLOW}Shutting down GhidraMCP server...${NC}"
-    # The Java application handles SIGTERM
-    exit 0
-}
+# Worker pool configuration
+WORKER_COUNT=${GHIDRA_MCP_WORKER_COUNT:-1}
+WORKER_JAVA_OPTS=${GHIDRA_MCP_WORKER_JAVA_OPTS:-${JAVA_OPTS}}
 
-trap cleanup SIGTERM SIGINT
-
-# Build command arguments
-ARGS="--port ${PORT} --bind ${BIND_ADDRESS}"
-
-# Append any passed arguments (don't replace)
-if [ "$#" -gt 0 ]; then
-    ARGS="${ARGS} $@"
+if ! [[ "${WORKER_COUNT}" =~ ^[1-9][0-9]*$ ]]; then
+    echo -e "${RED}Error: GHIDRA_MCP_WORKER_COUNT must be a positive integer${NC}"
+    exit 1
 fi
-
-# Check if a program file should be loaded
-if [ -n "${PROGRAM_FILE}" ] && [ -f "${PROGRAM_FILE}" ]; then
-    echo -e "${YELLOW}Loading program: ${PROGRAM_FILE}${NC}"
-    ARGS="${ARGS} --file ${PROGRAM_FILE}"
-fi
-
-# Check if a project should be loaded
-if [ -n "${PROJECT_PATH}" ] && [ -d "${PROJECT_PATH}" ]; then
-    echo -e "${YELLOW}Loading project: ${PROJECT_PATH}${NC}"
-    ARGS="${ARGS} --project ${PROJECT_PATH}"
-fi
-
-echo -e "${GREEN}Starting server...${NC}"
-echo ""
 
 # Build user.name option if GHIDRA_USER is set
 USER_OPT=""
@@ -113,12 +89,97 @@ if [ -n "${GHIDRA_USER}" ]; then
     USER_OPT="-Duser.name=${GHIDRA_USER}"
 fi
 
-# Start the server
-exec java \
-    ${JAVA_OPTS} \
-    ${USER_OPT} \
-    -Dghidra.home=${GHIDRA_HOME} \
-    -Dapplication.name=GhidraMCP \
-    -classpath "${CLASSPATH}" \
-    com.xebyte.headless.GhidraMCPHeadlessServer \
-    ${ARGS}
+EXTRA_ARGS=()
+if [ "$#" -gt 0 ]; then
+    EXTRA_ARGS=("$@")
+fi
+if [ -n "${PROGRAM_FILE:-}" ] && [ -f "${PROGRAM_FILE}" ]; then
+    EXTRA_ARGS+=("--file" "${PROGRAM_FILE}")
+fi
+if [ -n "${PROJECT_PATH:-}" ] && [ -e "${PROJECT_PATH}" ]; then
+    if [ "${WORKER_COUNT}" -gt 1 ]; then
+        echo -e "${RED}Error: PROJECT_PATH is incompatible with a multi-worker pool; use project_id routing instead.${NC}"
+        exit 1
+    fi
+    EXTRA_ARGS+=("--project" "${PROJECT_PATH}")
+fi
+
+echo -e "${YELLOW}Worker pool:${NC}"
+echo "  Workers: ${WORKER_COUNT}"
+echo "  Base Port: ${PORT}"
+echo "  Worker Java Options: ${WORKER_JAVA_OPTS}"
+echo ""
+
+start_worker() {
+    local index="$1"
+    local worker_port=$((PORT + index))
+    local worker_home="/data/workers/worker-${index}/home"
+    local worker_cache="/tmp/ghidra-script-cache/worker-${index}"
+
+    mkdir -p "${worker_home}" "${worker_cache}"
+
+    echo -e "${GREEN}Starting worker ${index} on port ${worker_port}...${NC}"
+    HOME="${worker_home}" \
+    GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
+    java \
+        ${WORKER_JAVA_OPTS} \
+        ${USER_OPT} \
+        -Duser.home="${worker_home}" \
+        -Dghidra.home="${GHIDRA_HOME}" \
+        -Dapplication.name="GhidraMCP-worker-${index}" \
+        -classpath "${CLASSPATH}" \
+        com.xebyte.headless.GhidraMCPHeadlessServer \
+        --port "${worker_port}" \
+        --bind "${BIND_ADDRESS}" \
+        "${EXTRA_ARGS[@]}" &
+    PIDS+=("$!")
+}
+
+if [ "${WORKER_COUNT}" -eq 1 ]; then
+    worker_home="/data/workers/worker-0/home"
+    worker_cache="/tmp/ghidra-script-cache/worker-0"
+    mkdir -p "${worker_home}" "${worker_cache}"
+    echo -e "${GREEN}Starting single Ghidra worker...${NC}"
+    exec env HOME="${worker_home}" GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
+        java \
+        ${WORKER_JAVA_OPTS} \
+        ${USER_OPT} \
+        -Duser.home="${worker_home}" \
+        -Dghidra.home="${GHIDRA_HOME}" \
+        -Dapplication.name="GhidraMCP-worker-0" \
+        -classpath "${CLASSPATH}" \
+        com.xebyte.headless.GhidraMCPHeadlessServer \
+        --port "${PORT}" \
+        --bind "${BIND_ADDRESS}" \
+        "${EXTRA_ARGS[@]}"
+fi
+
+PIDS=()
+
+cleanup() {
+    trap - SIGTERM SIGINT
+    echo ""
+    echo -e "${YELLOW}Shutting down GhidraMCP worker pool...${NC}"
+    if [ "${#PIDS[@]}" -gt 0 ]; then
+        kill "${PIDS[@]}" 2>/dev/null || true
+        wait "${PIDS[@]}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup SIGTERM SIGINT EXIT
+
+for ((i=0; i<WORKER_COUNT; i++)); do
+    start_worker "${i}"
+done
+
+# A worker exit means the pool is no longer consistent. Terminate the rest and
+# let Docker restart the whole service instead of silently running degraded.
+set +e
+wait -n "${PIDS[@]}"
+STATUS=$?
+set -e
+if [ "${STATUS}" -eq 0 ]; then
+    STATUS=1
+fi
+echo -e "${RED}A Ghidra worker exited (status ${STATUS}); restarting the pool.${NC}"
+exit "${STATUS}"
