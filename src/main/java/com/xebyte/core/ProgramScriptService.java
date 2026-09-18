@@ -1458,12 +1458,7 @@ public class ProgramScriptService {
     @McpTool(path = "/list_project_files", description = "List files in the current project", category = "program")
     public Response listProjectFiles(
             @Param(value = "folder", description = "Project folder path") String folderPath) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Project listing requires GUI mode (PluginTool not available)");
-        }
-
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1520,11 +1515,7 @@ public class ProgramScriptService {
     public Response createFolder(
             @Param(value = "path", source = ParamSource.BODY, description = "Project folder path to create") String folderPath,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
-        PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Folder creation requires GUI mode (PluginTool not available)");
-        }
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1558,10 +1549,7 @@ public class ProgramScriptService {
     public Response deleteFile(
             @Param(value = "filePath", source = ParamSource.BODY, description = "Project file path to delete") String filePath) {
         PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("File deletion requires GUI mode (PluginTool not available)");
-        }
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
@@ -1779,10 +1767,22 @@ public class ProgramScriptService {
             mtp.closeProgramByPath(filePath);
             return;
         }
-        // Close paths must NEVER spawn a CodeBrowser — there is nothing useful
-        // we can close in a fresh tool. findExistingProgramManager returns null
-        // if no CodeBrowser is running, in which case there is also nothing
-        // open to close, so we just return.
+
+        // Headless mode has no PluginTool/ProgramManager. The provider owns
+        // the Program consumer lifecycle, so release the matching Program
+        // through the same provider before deleting its DomainFile.
+        if (tool == null) {
+            for (Program prog : programProvider.getAllOpenPrograms()) {
+                if (prog.getDomainFile() != null
+                        && prog.getDomainFile().getPathname().equalsIgnoreCase(filePath)) {
+                    programProvider.closeProgram(prog);
+                    return;
+                }
+            }
+            return;
+        }
+
+        // GUI close paths must never spawn a CodeBrowser.
         ProgramManager pm = findExistingProgramManager(tool);
         if (pm == null) {
             return;
@@ -1790,12 +1790,6 @@ public class ProgramScriptService {
         for (Program prog : programProvider.getAllOpenPrograms()) {
             if (prog.getDomainFile() != null
                     && prog.getDomainFile().getPathname().equalsIgnoreCase(filePath)) {
-                // ignoreChanges=true: this only runs to clear the way for
-                // delete_file's delete() call right after, so there is
-                // nothing worth saving. false would risk Ghidra's own
-                // interactive "Save changes?" dialog, which blocks the Swing
-                // event thread -- and with it every other MCP request -- until
-                // a human dismisses it.
                 pm.closeProgram(prog, true);
                 return;
             }
