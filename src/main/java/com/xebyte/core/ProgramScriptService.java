@@ -1972,9 +1972,6 @@ public class ProgramScriptService {
             return Response.err("file_path is required");
         }
 
-        // Enforce GHIDRA_MCP_FILE_ROOT (when configured) for this filesystem-path endpoint,
-        // matching the headless import path. No-op when the root is unset (paths accepted
-        // as-is), so default localhost behavior is unchanged.
         SecurityConfig security = SecurityConfig.getInstance();
         java.nio.file.Path resolved = security.resolveWithinFileRoot(filePath);
         if (resolved == null) {
@@ -1988,90 +1985,73 @@ public class ProgramScriptService {
         }
 
         PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Import requires GUI mode (PluginTool not available)");
-        }
-
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
         }
 
-        boolean hasLanguage = languageId != null && !languageId.isEmpty();
+        String normalizedLanguageId = languageId == null ? "" : languageId.trim();
+        String normalizedCompilerSpecId = compilerSpecId == null ? "" : compilerSpecId.trim();
+        boolean hasLanguage = !normalizedLanguageId.isEmpty();
 
         try {
-            MessageLog log = new MessageLog();
             Program program;
 
-            if (hasLanguage) {
-                // Resolve language and compiler spec
-                ghidra.program.model.lang.LanguageService langService =
-                    ghidra.program.util.DefaultLanguageService.getLanguageService();
-                ghidra.program.model.lang.Language language = langService.getLanguage(
-                    new ghidra.program.model.lang.LanguageID(languageId));
-
-                ghidra.program.model.lang.CompilerSpec compilerSpec;
-                if (compilerSpecId != null && !compilerSpecId.isEmpty()) {
-                    compilerSpec = language.getCompilerSpecByID(
-                        new ghidra.program.model.lang.CompilerSpecID(compilerSpecId));
-                } else {
-                    compilerSpec = language.getDefaultCompilerSpec();
-                }
-
-                // Import as raw binary with explicit language/compiler spec
-                ghidra.app.util.opinion.Loaded<Program> loaded = AutoImporter.importAsBinary(
-                    file, project, projectFolder, language, compilerSpec,
-                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
-
-                if (loaded == null) {
-                    return Response.err("Import failed: no results. Log: " + log);
-                }
-                // getDomainObject(consumer) registers us as a consumer so the program stays open
-                program = loaded.getDomainObject(this);
+            if (tool == null) {
+                // Headless providers own the Program consumer lifecycle. Delegating
+                // the import here avoids manufacturing a GUI PluginTool and ensures
+                // the same provider that retains the Program also releases it later.
+                program = programProvider.importProgram(
+                    file, projectFolder, normalizedLanguageId, normalizedCompilerSpecId);
                 if (program == null) {
-                    return Response.err("Import failed: no primary program. Log: " + log);
+                    return Response.err("Import failed in headless mode for: " + filePath);
                 }
-                // Save to project folder (creates DomainFile)
-                loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
             } else {
-                // Auto-detect format
-                LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
-                    file, project, projectFolder,
-                    this, log, ghidra.util.task.TaskMonitor.DUMMY);
+                MessageLog log = new MessageLog();
+                if (hasLanguage) {
+                    ghidra.program.model.lang.LanguageService langService =
+                        ghidra.program.util.DefaultLanguageService.getLanguageService();
+                    ghidra.program.model.lang.Language language = langService.getLanguage(
+                        new ghidra.program.model.lang.LanguageID(normalizedLanguageId));
 
-                if (loadResults == null) {
-                    return Response.err("Import failed: no load spec found. Specify 'language' for raw binaries. Log: " + log);
+                    ghidra.program.model.lang.CompilerSpec compilerSpec =
+                        normalizedCompilerSpecId.isEmpty()
+                            ? language.getDefaultCompilerSpec()
+                            : language.getCompilerSpecByID(
+                                new ghidra.program.model.lang.CompilerSpecID(normalizedCompilerSpecId));
+
+                    ghidra.app.util.opinion.Loaded<Program> loaded = AutoImporter.importAsBinary(
+                        file, project, projectFolder, language, compilerSpec,
+                        this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                    if (loaded == null) {
+                        return Response.err("Import failed: no results. Log: " + log);
+                    }
+                    program = loaded.getDomainObject(this);
+                    if (program == null) {
+                        return Response.err("Import failed: no primary program. Log: " + log);
+                    }
+                    loaded.save(ghidra.util.task.TaskMonitor.DUMMY);
+                } else {
+                    LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
+                        file, project, projectFolder,
+                        this, log, ghidra.util.task.TaskMonitor.DUMMY);
+
+                    if (loadResults == null) {
+                        return Response.err(
+                            "Import failed: no load spec found. Specify 'language' for raw binaries. Log: "
+                                + log);
+                    }
+                    program = loadResults.getPrimaryDomainObject();
+                    if (program == null) {
+                        return Response.err("Import failed: no primary program. Log: " + log);
+                    }
+                    loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
                 }
-                program = loadResults.getPrimaryDomainObject();
-                if (program == null) {
-                    return Response.err("Import failed: no primary program. Log: " + log);
-                }
-                // Save to project folder before releasing (prevents "Database is closed")
-                loadResults.save(ghidra.util.task.TaskMonitor.DUMMY);
             }
-
-            // NOTE: do NOT call markProgramNotToAskToAnalyze here, ahead of the
-            // branches below. It mutates the program DB, and AutoAnalysisManager's
-            // own DomainObjectListener reacts to *any* program change by scheduling
-            // a background "Auto Analysis" task (the same mechanism documented on
-            // saveWithRetry above) -- confirmed root cause of a real, intermittent
-            // bug: that premature background pass could already be "actively
-            // running" by the time runAutoAnalysisAndPersistFlags below called its
-            // own startAnalysis(), which per its own javadoc is then a no-op
-            // ("if actively running... return immediately"), leaving
-            // waitForAnalysis() to wait on whatever partial pass Ghidra's own
-            // listener decided to run instead of the real one. Reproduced live:
-            // a fresh import came back with function_count 9 instead of 530, with
-            // analyzed:true and no error anywhere. Both branches below already set
-            // this flag themselves, inside their own transaction, so the call here
-            // was pure redundant risk with no benefit.
 
             boolean autoAnalyzed = false;
             if (autoAnalyze) {
-                // force=true (reAnalyzeAll first): unconditionally re-queues every
-                // analyzer regardless of anything Ghidra's own listeners may have
-                // already scheduled, closing the race described above. Matches
-                // /reanalyze, which has never shown this symptom.
                 autoAnalyzed = runAutoAnalysisAndPersistFlags(program, true);
             } else {
                 try {
@@ -2081,17 +2061,19 @@ public class ProgramScriptService {
                 }
             }
 
-            // Open after the analysis flags are persisted so CodeBrowser does not prompt.
-            ProgramManager pm = findOrCreateProgramManager(tool);
-            if (pm == null) {
-                return Response.err("Could not find or create a CodeBrowser tool");
+            if (tool != null) {
+                ProgramManager pm = findOrCreateProgramManager(tool);
+                if (pm == null) {
+                    return Response.err("Could not find or create a CodeBrowser tool");
+                }
+                Program finalProgram = program;
+                SwingUtilities.invokeAndWait(() -> {
+                    pm.openProgram(finalProgram);
+                    pm.setCurrentProgram(finalProgram);
+                });
+            } else {
+                programProvider.setCurrentProgram(program);
             }
-
-            Program finalProgram = program;
-            SwingUtilities.invokeAndWait(() -> {
-                pm.openProgram(finalProgram);
-                pm.setCurrentProgram(finalProgram);
-            });
 
             return Response.ok(JsonHelper.mapOf(
                 "success", true,
@@ -2101,11 +2083,12 @@ public class ProgramScriptService {
                 "analyzing", false,
                 "auto_analyzed", autoAnalyzed
             ));
+        } catch (UnsupportedOperationException e) {
+            return Response.err("Import is not supported by the active program provider: " + e.getMessage());
         } catch (Exception e) {
             String msg = e.getMessage();
             if (msg == null || msg.isEmpty()) {
                 msg = e.getClass().getName();
-                // Include cause if available
                 if (e.getCause() != null) {
                     msg += ": " + (e.getCause().getMessage() != null
                         ? e.getCause().getMessage() : e.getCause().getClass().getName());

@@ -206,18 +206,37 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * @param file The binary file to import
      * @return The loaded Program, or null on failure
      */
+    @Override
+    public Program importProgram(File file, String projectFolder,
+            String languageId, String compilerSpecId) {
+        String normalizedLanguageId = languageId == null ? "" : languageId.trim();
+        if (normalizedLanguageId.isEmpty()) {
+            return loadProgramFromFile(file, projectFolder);
+        }
+        return loadProgramFromFileWithLanguage(
+            file, projectFolder, normalizedLanguageId, compilerSpecId);
+    }
+
+    /**
+     * Load a program from a binary file into the project root.
+     */
     public Program loadProgramFromFile(File file) {
-        if (!file.exists()) {
-            Msg.error(this, "File not found: " + file.getAbsolutePath());
+        return loadProgramFromFile(file, "/");
+    }
+
+    /**
+     * Load a program from a binary file into a specific project folder.
+     */
+    public Program loadProgramFromFile(File file, String projectFolder) {
+        if (file == null || !file.exists()) {
+            Msg.error(this, "File not found: " + (file == null ? "<null>" : file.getAbsolutePath()));
             return null;
         }
 
+        String folder = normalizeProjectFolder(projectFolder);
         try {
-            // When a project is open, prefer opening an existing DomainFile with
-            // the same name (idempotent re-load) over re-importing — AutoImporter
-            // would otherwise throw DuplicateNameException on subsequent calls.
             if (project != null) {
-                Program existing = openExistingByName(file.getName());
+                Program existing = openExistingByName(file.getName(), folder);
                 if (existing != null) {
                     Msg.info(this, "Reopened existing program from project: "
                         + existing.getName() + " (" + file.getAbsolutePath() + ")");
@@ -228,42 +247,29 @@ public class HeadlessProgramProvider implements ProgramProvider {
             MessageLog log = new MessageLog();
             LoadResults<Program> loadResults = AutoImporter.importByUsingBestGuess(
                 file,
-                project,  // pass active project so the DomainFile has a real location
-                          // (was null → DomainFileProxy → df.save() throws
-                          // "Location does not exist for a save operation!")
-                "/",   // folder path (ignored when project is null → in-memory)
-                this,  // consumer
+                project,
+                folder,
+                this,
                 log,
                 monitor
             );
 
-            // AutoImporter returns Loaded<T> wrappers whose DomainFile is still a
-            // transient proxy until save() materialises them into the project tree.
-            // Without this step, /save_all_programs later throws ReadOnlyException:
-            // "Location does not exist for a save operation!".
             if (loadResults != null && project != null) {
                 loadResults.save(monitor);
             }
 
-            Program program = null;
-            if (loadResults != null) {
-                program = loadResults.getPrimaryDomainObject();
-            }
-
+            Program program = loadResults != null ? loadResults.getPrimaryDomainObject() : null;
             if (program != null) {
                 registerProgram(program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
-                Msg.info(this, "Loaded program: " + program.getName() +
-                    " (" + file.getAbsolutePath() + ")");
+                currentProgram = program;
+                Msg.info(this, "Loaded program: " + program.getName()
+                    + " (" + file.getAbsolutePath() + ") into " + folder);
             } else {
                 Msg.error(this, "Failed to load program from: " + file.getAbsolutePath());
                 if (!log.toString().isEmpty()) {
-                    Msg.error(this, "Import log: " + log.toString());
+                    Msg.error(this, "Import log: " + log);
                 }
             }
-
             return program;
         } catch (Exception e) {
             Msg.error(this, "Error loading program from file: " + file.getAbsolutePath(), e);
@@ -272,40 +278,35 @@ public class HeadlessProgramProvider implements ProgramProvider {
     }
 
     /**
-     * Load a raw binary with an explicit language / compiler spec.
-     *
-     * Used for firmware blobs and other raw images where AutoImporter's best-guess
-     * format detection has no header to latch onto (e.g. ARM Cortex-M .mem dumps).
-     * Mirrors {@link #loadProgramFromFile(File)} for openPrograms / currentProgram
-     * bookkeeping so subsequent /list_functions, /decompile_function, etc. resolve
-     * the result transparently.
-     *
-     * @param file         The raw binary file
-     * @param languageId   Ghidra language ID, e.g. "ARM:LE:32:Cortex"
-     * @param compilerSpecId Optional compiler-spec ID; empty/null falls back to the language default
-     * @return The loaded Program, or null on failure
+     * Load a raw binary with an explicit language/compiler spec into the project root.
      */
-    public Program loadProgramFromFileWithLanguage(File file, String languageId, String compilerSpecId) {
-        if (!file.exists()) {
-            Msg.error(this, "File not found: " + file.getAbsolutePath());
+    public Program loadProgramFromFileWithLanguage(
+            File file, String languageId, String compilerSpecId) {
+        return loadProgramFromFileWithLanguage(file, "/", languageId, compilerSpecId);
+    }
+
+    /**
+     * Load a raw binary with an explicit language/compiler spec into a project folder.
+     */
+    public Program loadProgramFromFileWithLanguage(
+            File file, String projectFolder, String languageId, String compilerSpecId) {
+        if (file == null || !file.exists()) {
+            Msg.error(this, "File not found: " + (file == null ? "<null>" : file.getAbsolutePath()));
             return null;
         }
         if (languageId == null || languageId.trim().isEmpty()) {
             Msg.error(this, "loadProgramFromFileWithLanguage requires a non-empty languageId");
             return null;
         }
-        // Normalize before constructing IDs: a doc-copied " ARM:LE:32:Cortex "
-        // passes the non-empty check above but fails the LanguageID lookup.
-        languageId = languageId.trim();
+
+        String folder = normalizeProjectFolder(projectFolder);
+        String normalizedLanguageId = languageId.trim();
         String normalizedCompilerSpecId =
-            (compilerSpecId == null) ? "" : compilerSpecId.trim();
+            compilerSpecId == null ? "" : compilerSpecId.trim();
 
         try {
-            // Same idempotency guard as loadProgramFromFile: if a project is
-            // open and a same-named DomainFile already exists, reopen it
-            // rather than re-importing (which would throw DuplicateNameException).
             if (project != null) {
-                Program existing = openExistingByName(file.getName());
+                Program existing = openExistingByName(file.getName(), folder);
                 if (existing != null) {
                     Msg.info(this, "Reopened existing raw binary from project: "
                         + existing.getName() + " (" + file.getAbsolutePath() + ")");
@@ -314,60 +315,60 @@ public class HeadlessProgramProvider implements ProgramProvider {
             }
 
             LanguageService langService = DefaultLanguageService.getLanguageService();
-            Language language = langService.getLanguage(new LanguageID(languageId));
-
-            CompilerSpec compilerSpec;
-            if (!normalizedCompilerSpecId.isEmpty()) {
-                compilerSpec = language.getCompilerSpecByID(new CompilerSpecID(normalizedCompilerSpecId));
-            } else {
-                compilerSpec = language.getDefaultCompilerSpec();
-            }
+            Language language = langService.getLanguage(new LanguageID(normalizedLanguageId));
+            CompilerSpec compilerSpec = normalizedCompilerSpecId.isEmpty()
+                ? language.getDefaultCompilerSpec()
+                : language.getCompilerSpecByID(new CompilerSpecID(normalizedCompilerSpecId));
 
             MessageLog log = new MessageLog();
             Loaded<Program> loaded = AutoImporter.importAsBinary(
                 file,
-                project, // pass active project so the DomainFile has a real location
-                         // (was null → DomainFileProxy → df.save() throws
-                         // "Location does not exist for a save operation!")
-                "/",    // folder path (ignored when project is null → in-memory)
+                project,
+                folder,
                 language,
                 compilerSpec,
-                this,   // consumer
+                this,
                 log,
                 monitor
             );
 
-            // Materialise the Loaded into the project tree — see twin block in
-            // loadProgramFromFile for the full rationale.
             if (loaded != null && project != null) {
                 loaded.save(monitor);
             }
 
-            Program program = null;
-            if (loaded != null) {
-                program = loaded.getDomainObject(this);
-            }
-
+            Program program = loaded != null ? loaded.getDomainObject(this) : null;
             if (program != null) {
                 registerProgram(program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
+                currentProgram = program;
                 Msg.info(this, "Loaded raw binary: " + program.getName()
-                    + " (" + file.getAbsolutePath() + ") as " + languageId);
+                    + " (" + file.getAbsolutePath() + ") as " + normalizedLanguageId
+                    + " into " + folder);
             } else {
                 Msg.error(this, "Failed to load raw binary from: " + file.getAbsolutePath());
                 if (!log.toString().isEmpty()) {
-                    Msg.error(this, "Import log: " + log.toString());
+                    Msg.error(this, "Import log: " + log);
                 }
             }
-
             return program;
         } catch (Exception e) {
             Msg.error(this, "Error loading raw binary from file: " + file.getAbsolutePath()
-                + " (language=" + languageId + ")", e);
+                + " (language=" + normalizedLanguageId + ")", e);
             return null;
         }
+    }
+
+    private static String normalizeProjectFolder(String projectFolder) {
+        if (projectFolder == null || projectFolder.trim().isEmpty() || "/".equals(projectFolder.trim())) {
+            return "/";
+        }
+        String folder = projectFolder.trim();
+        if (!folder.startsWith("/")) {
+            folder = "/" + folder;
+        }
+        while (folder.length() > 1 && folder.endsWith("/")) {
+            folder = folder.substring(0, folder.length() - 1);
+        }
+        return folder;
     }
 
     /**
@@ -383,31 +384,29 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * @return the opened Program if an entry exists in the project tree, or
      *         {@code null} when no project is open or no match is found
      */
-    private Program openExistingByName(String name) {
+    private Program openExistingByName(String name, String projectFolder) {
         if (project == null || name == null || name.isEmpty()) return null;
+        String folder = normalizeProjectFolder(projectFolder);
+        String expectedPath = "/".equals(folder) ? "/" + name : folder + "/" + name;
         try {
-            // Hot path: already opened in this session.
             Program cached = openPrograms.get(name);
-            if (cached != null) return cached;
+            if (cached != null && cached.getDomainFile() != null
+                    && expectedPath.equals(cached.getDomainFile().getPathname())) {
+                return cached;
+            }
 
-            // Idempotency is scoped to the import location (root): the loaders
-            // always import under folder "/", so a recursive search could reopen
-            // a same-named program from a different folder and break the
-            // intended "reload the file I just imported" contract.
             ProjectData pd = project.getProjectData();
-            DomainFile df = pd.getFile("/" + name);
+            DomainFile df = pd.getFile(expectedPath);
             if (df == null) return null;
 
             Program program = (Program) df.getDomainObject(this, true, false, monitor);
             if (program != null) {
-                openPrograms.put(program.getName(), program);
-                if (currentProgram == null) {
-                    currentProgram = program;
-                }
+                registerProgram(program);
+                currentProgram = program;
             }
             return program;
         } catch (Exception e) {
-            Msg.warn(this, "openExistingByName failed for '" + name + "': " + e.getMessage());
+            Msg.warn(this, "openExistingByName failed for '" + expectedPath + "': " + e.getMessage());
             return null;
         }
     }

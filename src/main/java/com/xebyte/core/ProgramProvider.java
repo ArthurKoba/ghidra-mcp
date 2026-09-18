@@ -15,6 +15,7 @@
  */
 package com.xebyte.core;
 
+import java.io.File;
 import ghidra.program.model.listing.Program;
 
 /**
@@ -90,6 +91,25 @@ public interface ProgramProvider {
      */
     default ghidra.framework.model.Project getProject() {
         return null;
+    }
+
+    /**
+     * Import a binary into this provider's active project.
+     *
+     * <p>The provider owns the imported Program's lifecycle. This matters in
+     * headless mode where there is no PluginTool/ProgramManager consumer and
+     * the provider itself must retain and eventually release the Program.
+     *
+     * @param file source file on the local Ghidra host
+     * @param projectFolder destination folder in the active project
+     * @param languageId optional explicit Ghidra language ID; blank means auto-detect
+     * @param compilerSpecId optional compiler spec ID
+     * @return imported/opened Program, or null when import failed
+     * @throws UnsupportedOperationException when this provider cannot import files
+     */
+    default Program importProgram(File file, String projectFolder,
+            String languageId, String compilerSpecId) {
+        throw new UnsupportedOperationException("Binary import is not supported by this program provider");
     }
 
     /**
