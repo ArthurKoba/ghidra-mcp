@@ -137,7 +137,7 @@ ENV HOME=/home/ghidra
 USER 1000:1000
 
 # Expose port
-EXPOSE 8089
+EXPOSE 8089 8090 8091 8092
 
 # Volume for persistent data and projects
 VOLUME ["/data", "/projects", "/artifacts"]
@@ -152,5 +152,5 @@ WORKDIR /app
 # Entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
 
-# Default command (can be overridden)
-CMD ["--port", "8089"]
+# Worker ports are owned by entrypoint.sh; no implicit CLI port override.
+CMD []
