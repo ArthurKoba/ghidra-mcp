@@ -12,10 +12,37 @@ from . import project_sessions
 from . import registry
 from . import state
 from . import transport
-from .config import STATIC_TOOL_NAMES, logger
+from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
 from .server import Context, mcp
 from .validation import validate_server_url
 
+
+def _list_instances_sync() -> str:
+    """
+    List known Ghidra instances from UDS discovery and the active TCP fallback.
+
+    Returns JSON with each instance's project name, PID, open programs, and
+    socket path or TCP URL. Also shows which instance is currently connected.
+    """
+    instances = discovery.discover_instances()
+    tcp_instance = discovery.discover_active_tcp_instance()
+    if tcp_instance:
+        instances.append(tcp_instance)
+
+    if not instances:
+        return json.dumps({"instances": [], "note": "No running Ghidra instances found."})
+
+    for inst in instances:
+        if inst.get("transport") == "tcp":
+            inst["connected"] = state._transport_mode == "tcp" and inst.get("url") == state._active_tcp
+        else:
+            # UDS-discovered instances may carry a TCP url too (Windows
+            # enrichment) — either transport counts as connected.
+            inst["connected"] = inst["socket"] == state._active_socket or (
+                state._transport_mode == "tcp" and bool(inst.get("url")) and inst.get("url") == state._active_tcp
+            )
+
+    return json.dumps({"instances": [_summarize_instance(i) for i in instances]}, indent=2)
 
 @mcp.tool(name="list_instances")
 async def _list_instances_tool() -> str:
@@ -161,6 +188,12 @@ async def connect_instance(project: str, ctx: Context | None = None) -> str:
     except project_sessions.ProjectSessionError as exc:
         return json.dumps({"error": str(exc)})
 
+
+def _load_groups_sync(group_names: list[str]) -> list[str]:
+    loaded: list[str] = []
+    for name in group_names:
+        loaded.extend(registry._load_group(name))
+    return loaded
 
 @mcp.tool()
 def list_tool_groups() -> str:
