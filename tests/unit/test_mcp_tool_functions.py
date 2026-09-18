@@ -279,7 +279,7 @@ class TestSchemaEdgeCases(unittest.TestCase):
         schema = {"properties": props, "required": ["param_0"]}
         fn = _build_tool_function("/test", "POST", schema)
         sig = inspect.signature(fn)
-        self.assertEqual(len(sig.parameters), 21)
+        self.assertEqual(len(sig.parameters), 22)
         self.assertIn("dry_run", sig.parameters)
 
 
