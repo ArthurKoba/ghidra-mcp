@@ -8,8 +8,8 @@ import junit.framework.TestCase;
 
 /**
  * Validation + guard coverage for ProgramScriptService (~2.3K LOC, previously only the
- * run-script propagation offline test). Exercises required-param guards, GUI-mode guards
- * (no PluginTool under the stub provider), and the script-execution security gate — all
+ * run-script propagation offline test). Exercises required-param guards, project-state guards,
+ * and the script-execution security gate — all
  * before any program access, so they run offline.
  */
 public class ProgramScriptServiceValidationTest extends TestCase {
@@ -46,11 +46,11 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         assertTrue(((Response.Err) r).message().contains("file_path is required"));
     }
 
-    public void testListProjectFilesRequiresGuiMode() {
-        // Stub provider exposes no PluginTool, so the GUI-only guard must fire.
+    public void testListProjectFilesRequiresOpenProject() {
+        // Stub provider has no active project, so the provider-aware project guard must fire.
         Response r = scripts.listProjectFiles("/");
         assertTrue(r instanceof Response.Err);
-        assertTrue(((Response.Err) r).message().contains("requires GUI mode"));
+        assertTrue(((Response.Err) r).message().contains("No project is currently open"));
     }
 
     public void testRunScriptInlineGatedByDefault() {
