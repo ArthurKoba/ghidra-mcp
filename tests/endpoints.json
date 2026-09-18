@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 253,
+  "total_endpoints": 254,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -1498,6 +1498,13 @@
         "program"
       ],
       "description": "Get valid data type names"
+    },
+    {
+      "path": "/get_storage_info",
+      "method": "GET",
+      "category": "headless",
+      "params": [],
+      "description": "Report configured artifact/project/script roots and whether they are present and writable. Local project storage is independent from Ghidra Server credentials."
     },
     {
       "path": "/get_version",

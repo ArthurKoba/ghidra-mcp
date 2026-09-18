@@ -163,7 +163,7 @@ public class RunGhidraScriptProgramPropagationTest extends TestCase {
 
         int initCall = src.indexOf("ensureScriptBundleHostInitialized("
                 + "scriptFileForExecution.getParentFile())", methodStart);
-        int copyWarning = src.indexOf("Warning: Could not copy script to ~/ghidra_scripts/", methodStart);
+        int copyWarning = src.indexOf("Warning: Could not copy script to the ephemeral script cache/", methodStart);
         int initError = src.indexOf("ERROR: Could not initialize Ghidra script bundle host for:", methodStart);
         int providerLookup = src.indexOf("GhidraScriptUtil.getProvider", methodStart);
 
