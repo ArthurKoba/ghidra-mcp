@@ -157,13 +157,11 @@ SImm15: val is ls_imm15
     { export *[const]:4 ls_imm15; }
 
 JTarget32: addr is jdisp_lo & jdisp_hi
-    [ disp = (jdisp_hi << 14) | jdisp_lo;
-      addr = (inst_start & 0xfe000000) | (disp << 1); ]
+    [ addr = (inst_start & 0xfe000000) | (((jdisp_hi << 14) | jdisp_lo) << 1); ]
     { export *:4 addr; }
 
 BTarget32: addr is bc_disp_lo & bc_disp_hi_s
-    [ disp = (bc_disp_hi_s << 9) | bc_disp_lo;
-      addr = inst_start + (disp << 1); ]
+    [ addr = inst_start + (((bc_disp_hi_s << 9) | bc_disp_lo) << 1); ]
     { export *:4 addr; }
 
 JTarget16: addr is j11
