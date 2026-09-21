@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### SCORE7 processor runtime fix
+
+- The native Sunplus S+CORE 7 / SCORE7 processor module is installed into the Docker image and compiled with the bundled Ghidra SLEIGH compiler.
+- Fixed the generated `SCORE7.sla` permissions so the unprivileged Ghidra runtime user can load `SCORE7:LE:32:default`.
+- Docker build now verifies the compiled `.sla` and language definition are readable after switching to runtime UID/GID `1000:1000`.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was
