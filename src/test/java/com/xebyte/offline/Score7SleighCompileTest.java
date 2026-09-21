@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.Test;
 
 public class Score7SleighCompileTest {
@@ -62,6 +63,53 @@ public class Score7SleighCompileTest {
             Files.deleteIfExists(output);
             Files.deleteIfExists(tempDir);
         }
+    }
+
+    @Test
+    public void score7PacketWideConstructorsRequireAlignedPacketPhase() throws Exception {
+        Path source = Path.of(
+            "ghidra_processors",
+            "SCORE7",
+            "data",
+            "languages",
+            "SCORE7.slaspec"
+        ).toAbsolutePath();
+
+        List<String> lines = Files.readAllLines(source);
+        List<String> rootConstructors = lines.stream()
+            .filter(line -> line.startsWith(":") && !line.startsWith(":^instruction"))
+            .toList();
+
+        assertEquals("unexpected SCORE7 root-constructor count", 325, rootConstructors.size());
+        assertTrue(
+            "every real instruction constructor must be below the decode wrapper",
+            rootConstructors.stream().allMatch(line -> line.contains("decode_phase=1"))
+        );
+
+        List<String> packetWideConstructors = rootConstructors.stream()
+            .filter(line -> line.contains("p_lo="))
+            .toList();
+        assertEquals(
+            "unexpected SCORE7 packet-wide constructor count",
+            219,
+            packetWideConstructors.size()
+        );
+        assertTrue(
+            "32-bit/PCE/parity constructors must not start from PC+2",
+            packetWideConstructors.stream().allMatch(line -> line.contains("packet_half=0"))
+        );
+        assertTrue(
+            "root wrapper must derive the transient packet phase from inst_start",
+            lines.stream().anyMatch(line ->
+                line.contains(":^instruction is decode_phase=0 & instruction")
+            )
+        );
+        assertTrue(
+            "root wrapper must derive PC bit 1 before recursive decode",
+            lines.stream().anyMatch(line ->
+                line.contains("packet_half = (inst_start >> 1) $and 1")
+            )
+        );
     }
 
     private static Path findCiGhidraRoot() throws Exception {
