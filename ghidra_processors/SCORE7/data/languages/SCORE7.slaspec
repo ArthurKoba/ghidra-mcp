@@ -173,38 +173,73 @@ BTarget16: addr is b8
     { export *:4 addr; }
 
 # 5-bit push/pop register is physically split across bit 7 and bits 8..11.
-PReg: r0 is preg_hi=0 & preg_lo=0 { export r0; }
-PReg: r1 is preg_hi=0 & preg_lo=1 { export r1; }
-PReg: r2 is preg_hi=0 & preg_lo=2 { export r2; }
-PReg: r3 is preg_hi=0 & preg_lo=3 { export r3; }
-PReg: r4 is preg_hi=0 & preg_lo=4 { export r4; }
-PReg: r5 is preg_hi=0 & preg_lo=5 { export r5; }
-PReg: r6 is preg_hi=0 & preg_lo=6 { export r6; }
-PReg: r7 is preg_hi=0 & preg_lo=7 { export r7; }
-PReg: r8 is preg_hi=0 & preg_lo=8 { export r8; }
-PReg: r9 is preg_hi=0 & preg_lo=9 { export r9; }
-PReg: r10 is preg_hi=0 & preg_lo=10 { export r10; }
-PReg: r11 is preg_hi=0 & preg_lo=11 { export r11; }
-PReg: r12 is preg_hi=0 & preg_lo=12 { export r12; }
-PReg: r13 is preg_hi=0 & preg_lo=13 { export r13; }
-PReg: r14 is preg_hi=0 & preg_lo=14 { export r14; }
-PReg: r15 is preg_hi=0 & preg_lo=15 { export r15; }
-PReg: r16 is preg_hi=1 & preg_lo=0 { export r16; }
-PReg: r17 is preg_hi=1 & preg_lo=1 { export r17; }
-PReg: r18 is preg_hi=1 & preg_lo=2 { export r18; }
-PReg: r19 is preg_hi=1 & preg_lo=3 { export r19; }
-PReg: r20 is preg_hi=1 & preg_lo=4 { export r20; }
-PReg: r21 is preg_hi=1 & preg_lo=5 { export r21; }
-PReg: r22 is preg_hi=1 & preg_lo=6 { export r22; }
-PReg: r23 is preg_hi=1 & preg_lo=7 { export r23; }
-PReg: r24 is preg_hi=1 & preg_lo=8 { export r24; }
-PReg: r25 is preg_hi=1 & preg_lo=9 { export r25; }
-PReg: r26 is preg_hi=1 & preg_lo=10 { export r26; }
-PReg: r27 is preg_hi=1 & preg_lo=11 { export r27; }
-PReg: r28 is preg_hi=1 & preg_lo=12 { export r28; }
-PReg: r29 is preg_hi=1 & preg_lo=13 { export r29; }
-PReg: r30 is preg_hi=1 & preg_lo=14 { export r30; }
-PReg: r31 is preg_hi=1 & preg_lo=15 { export r31; }
+PReg: r0 is preg_hi=0 & preg_lo=0 & r0 { export r0; }
+PReg: r1 is preg_hi=0 & preg_lo=1 & r1 { export r1; }
+PReg: r2 is preg_hi=0 & preg_lo=2 & r2 { export r2; }
+PReg: r3 is preg_hi=0 & preg_lo=3 & r3 { export r3; }
+PReg: r4 is preg_hi=0 & preg_lo=4 & r4 { export r4; }
+PReg: r5 is preg_hi=0 & preg_lo=5 & r5 { export r5; }
+PReg: r6 is preg_hi=0 & preg_lo=6 & r6 { export r6; }
+PReg: r7 is preg_hi=0 & preg_lo=7 & r7 { export r7; }
+PReg: r8 is preg_hi=0 & preg_lo=8 & r8 { export r8; }
+PReg: r9 is preg_hi=0 & preg_lo=9 & r9 { export r9; }
+PReg: r10 is preg_hi=0 & preg_lo=10 & r10 { export r10; }
+PReg: r11 is preg_hi=0 & preg_lo=11 & r11 { export r11; }
+PReg: r12 is preg_hi=0 & preg_lo=12 & r12 { export r12; }
+PReg: r13 is preg_hi=0 & preg_lo=13 & r13 { export r13; }
+PReg: r14 is preg_hi=0 & preg_lo=14 & r14 { export r14; }
+PReg: r15 is preg_hi=0 & preg_lo=15 & r15 { export r15; }
+PReg: r16 is preg_hi=1 & preg_lo=0 & r16 { export r16; }
+PReg: r17 is preg_hi=1 & preg_lo=1 & r17 { export r17; }
+PReg: r18 is preg_hi=1 & preg_lo=2 & r18 { export r18; }
+PReg: r19 is preg_hi=1 & preg_lo=3 & r19 { export r19; }
+PReg: r20 is preg_hi=1 & preg_lo=4 & r20 { export r20; }
+PReg: r21 is preg_hi=1 & preg_lo=5 & r21 { export r21; }
+PReg: r22 is preg_hi=1 & preg_lo=6 & r22 { export r22; }
+PReg: r23 is preg_hi=1 & preg_lo=7 & r23 { export r23; }
+PReg: r24 is preg_hi=1 & preg_lo=8 & r24 { export r24; }
+PReg: r25 is preg_hi=1 & preg_lo=9 & r25 { export r25; }
+PReg: r26 is preg_hi=1 & preg_lo=10 & r26 { export r26; }
+PReg: r27 is preg_hi=1 & preg_lo=11 & r27 { export r27; }
+PReg: r28 is preg_hi=1 & preg_lo=12 & r28 { export r28; }
+PReg: r29 is preg_hi=1 & preg_lo=13 & r29 { export r29; }
+PReg: r30 is preg_hi=1 & preg_lo=14 & r30 { export r30; }
+PReg: r31 is preg_hi=1 & preg_lo=15 & r31 { export r31; }
+
+
+# High GPR bank used by mlfh!/mhfl!.
+HighRA: r16 is ra16=0 & r16 { export r16; }
+HighRA: r17 is ra16=1 & r17 { export r17; }
+HighRA: r18 is ra16=2 & r18 { export r18; }
+HighRA: r19 is ra16=3 & r19 { export r19; }
+HighRA: r20 is ra16=4 & r20 { export r20; }
+HighRA: r21 is ra16=5 & r21 { export r21; }
+HighRA: r22 is ra16=6 & r22 { export r22; }
+HighRA: r23 is ra16=7 & r23 { export r23; }
+HighRA: r24 is ra16=8 & r24 { export r24; }
+HighRA: r25 is ra16=9 & r25 { export r25; }
+HighRA: r26 is ra16=10 & r26 { export r26; }
+HighRA: r27 is ra16=11 & r27 { export r27; }
+HighRA: r28 is ra16=12 & r28 { export r28; }
+HighRA: r29 is ra16=13 & r29 { export r29; }
+HighRA: r30 is ra16=14 & r30 { export r30; }
+HighRA: r31 is ra16=15 & r31 { export r31; }
+HighRD: r16 is rd16=0 & r16 { export r16; }
+HighRD: r17 is rd16=1 & r17 { export r17; }
+HighRD: r18 is rd16=2 & r18 { export r18; }
+HighRD: r19 is rd16=3 & r19 { export r19; }
+HighRD: r20 is rd16=4 & r20 { export r20; }
+HighRD: r21 is rd16=5 & r21 { export r21; }
+HighRD: r22 is rd16=6 & r22 { export r22; }
+HighRD: r23 is rd16=7 & r23 { export r23; }
+HighRD: r24 is rd16=8 & r24 { export r24; }
+HighRD: r25 is rd16=9 & r25 { export r25; }
+HighRD: r26 is rd16=10 & r26 { export r26; }
+HighRD: r27 is rd16=11 & r27 { export r27; }
+HighRD: r28 is rd16=12 & r28 { export r28; }
+HighRD: r29 is rd16=13 & r29 { export r29; }
+HighRD: r30 is rd16=14 & r30 { export r30; }
+HighRD: r31 is rd16=15 & r31 { export r31; }
 
 # ----- flag helpers -----
 # cr1 low bits: V=bit0, C=bit1, Z=bit2, N=bit3, T=bit4.
@@ -347,7 +382,9 @@ macro score_set_t(value) {
 
 :mul ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=32 & ra32 & rb32 {
     local a:8=sext(ra32); local b:8=sext(rb32); local product:8=a*b;
-    cel=product; ceh=product >> 32;
+    cel=product:4;
+    local upper:8=product >> 32;
+    ceh=upper:4;
 }
 :mulu ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=33 & ra32 & rb32 {
     local a:8=zext(ra32); local b:8=zext(rb32); local product:8=a*b;
@@ -466,8 +503,8 @@ macro score_set_t(value) {
 # ===========================================================================
 
 :nop! is p16=0 & op16=0 & func16=0 { }
-:mlfh! rd16,ra16 is p16=0 & op16=0 & func16=1 & rd16 & ra16 { rd16 = ra16; }
-:mhfl! rd16,ra16 is p16=0 & op16=0 & func16=2 & rd16 & ra16 { rd16 = ra16; }
+:mlfh! rd16,HighRA is p16=0 & op16=0 & func16=1 & rd16 & HighRA { rd16 = HighRA; }
+:mhfl! HighRD,ra16 is p16=0 & op16=0 & func16=2 & HighRD & ra16 { HighRD = ra16; }
 :mv! rd16,ra16 is p16=0 & op16=0 & func16=3 & rd16 & ra16 { rd16=ra16; }
 :sll! rd16,ra16 is p16=0 & op16=0 & func16=8 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16<<sh; }
 :addc! rd16,ra16 is p16=0 & op16=0 & func16=9 & rd16 & ra16 { local c:4=(cr1>>1)&1; rd16=rd16+ra16+c; }
