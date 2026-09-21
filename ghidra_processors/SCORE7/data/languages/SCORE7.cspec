@@ -24,9 +24,9 @@
   <global>
     <range space="ram"/>
   </global>
-  <stackpointer register="sp" space="ram" growth="negative"/>
+  <stackpointer register="r0" space="ram" growth="negative"/>
   <returnaddress>
-    <register name="ra"/>
+    <register name="r3"/>
   </returnaddress>
   <default_proto>
     <prototype name="score7_gcc" extrapop="0" stackshift="0">
@@ -54,8 +54,8 @@
         <register name="r19"/>
         <register name="r20"/>
         <register name="r21"/>
-        <register name="sp"/>
-        <register name="gp"/>
+        <register name="r0"/>
+        <register name="r28"/>
       </unaffected>
       <killedbycall>
         <register name="r4"/>
