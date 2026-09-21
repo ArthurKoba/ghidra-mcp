@@ -1,0 +1,17 @@
+// Standalone Ghidra extension build.
+//
+// Supply GHIDRA_INSTALL_DIR either as an environment variable or Gradle
+// property. Ghidra's own buildExtension.gradle packages data/languages and
+// compiles the processor-language sources as part of the normal extension flow.
+
+def ghidraInstallDir = System.getenv("GHIDRA_INSTALL_DIR")
+if (!ghidraInstallDir && project.hasProperty("GHIDRA_INSTALL_DIR")) {
+    ghidraInstallDir = project.property("GHIDRA_INSTALL_DIR")
+}
+if (!ghidraInstallDir) {
+    throw new GradleException(
+        "Set GHIDRA_INSTALL_DIR to a Ghidra installation before building"
+    )
+}
+
+apply from: new File(ghidraInstallDir).canonicalPath + "/support/buildExtension.gradle"
