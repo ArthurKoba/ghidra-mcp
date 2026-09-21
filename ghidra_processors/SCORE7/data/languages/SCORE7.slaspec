@@ -642,65 +642,65 @@ macro score_set_t(value) {
 :br! ra16 is p16=0 & op16=0 & func16=4 & rd16=15 & ra16 { goto [ra16]; }
 :brl! ra16 is p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { ra=inst_next; call [ra16]; }
 
-:tcs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=0 { score_set_t(0); if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tcs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvcs rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=0 & rd32 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tcs! is p16=0 & op16=0 & func16=5 & rd16=0 { score_set_t(0); if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tcs! is p16=0 & op16=0 & func16=5 & rd16=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tcc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=1 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tcc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvcc rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=1 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tcc! is p16=0 & op16=0 & func16=5 & rd16=1 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tcc! is p16=0 & op16=0 & func16=5 & rd16=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tgtu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=2 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; score_set_t(1); <done> }
+:tgtu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
 :mvgtu rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=2 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; rd32=ra32; <done> }
-:tgtu! is p16=0 & op16=0 & func16=5 & rd16=2 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; score_set_t(1); <done> }
+:tgtu! is p16=0 & op16=0 & func16=5 & rd16=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
 
-:tleu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=3 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tleu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvleu rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=3 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tleu! is p16=0 & op16=0 & func16=5 & rd16=3 { score_set_t(0); if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tleu! is p16=0 & op16=0 & func16=5 & rd16=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:teq is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=4 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:teq is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mveq rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=4 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:teq! is p16=0 & op16=0 & func16=5 & rd16=4 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:teq! is p16=0 & op16=0 & func16=5 & rd16=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tne is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=5 { score_set_t(0); if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tne is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvne rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=5 & rd32 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tne! is p16=0 & op16=0 & func16=5 & rd16=5 { score_set_t(0); if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tne! is p16=0 & op16=0 & func16=5 & rd16=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tgt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=6 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; score_set_t(1); <done> }
+:tgt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
 :mvgt rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=6 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; rd32=ra32; <done> }
-:tgt! is p16=0 & op16=0 & func16=5 & rd16=6 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; score_set_t(1); <done> }
+:tgt! is p16=0 & op16=0 & func16=5 & rd16=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
 
-:tle is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=7 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tle is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvle rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=7 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tle! is p16=0 & op16=0 & func16=5 & rd16=7 { score_set_t(0); if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tle! is p16=0 & op16=0 & func16=5 & rd16=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tge is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=8 { score_set_t(0); if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tge is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvge rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=8 & rd32 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tge! is p16=0 & op16=0 & func16=5 & rd16=8 { score_set_t(0); if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tge! is p16=0 & op16=0 & func16=5 & rd16=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tlt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=9 { score_set_t(0); if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tlt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvlt rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=9 & rd32 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tlt! is p16=0 & op16=0 & func16=5 & rd16=9 { score_set_t(0); if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tlt! is p16=0 & op16=0 & func16=5 & rd16=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tmi is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=10 { score_set_t(0); if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tmi is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvmi rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=10 & rd32 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tmi! is p16=0 & op16=0 & func16=5 & rd16=10 { score_set_t(0); if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tmi! is p16=0 & op16=0 & func16=5 & rd16=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tpl is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=11 { score_set_t(0); if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tpl is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvpl rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=11 & rd32 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tpl! is p16=0 & op16=0 & func16=5 & rd16=11 { score_set_t(0); if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tpl! is p16=0 & op16=0 & func16=5 & rd16=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tvs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=12 { score_set_t(0); if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tvs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvvs rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=12 & rd32 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tvs! is p16=0 & op16=0 & func16=5 & rd16=12 { score_set_t(0); if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tvs! is p16=0 & op16=0 & func16=5 & rd16=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tvc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=13 { score_set_t(0); if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tvc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvvc rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=13 & rd32 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tvc! is p16=0 & op16=0 & func16=5 & rd16=13 { score_set_t(0); if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> score_set_t(1); <done> }
+:tvc! is p16=0 & op16=0 & func16=5 & rd16=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tcnz is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=14 { score_set_t(0); if (sr0 != 0) goto <yes>; goto <done>; <yes> score_set_t(1); <done> }
-:tcnz! is p16=0 & op16=0 & func16=5 & rd16=14 { score_set_t(0); if (sr0 != 0) goto <yes>; goto <done>; <yes> score_set_t(1); <done> }
+:tcnz is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
+:tcnz! is p16=0 & op16=0 & func16=5 & rd16=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
 
-:t is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=15 { score_set_t(1); }
+:t is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=15 { cr1 = cr1 | 0x10; }
 :mv rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=15 & rd32 & ra32 { rd32=ra32; }
-:t! is p16=0 & op16=0 & func16=5 & rd16=15 { score_set_t(1); }
+:t! is p16=0 & op16=0 & func16=5 & rd16=15 { cr1 = cr1 | 0x10; }
