@@ -1,25 +1,20 @@
 package com.xebyte.offline;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import ghidra.pcodeCPort.slgh_compile.SleighCompile;
-import ghidra.pcodeCPort.slgh_compile.SleighCompileOptions;
 import ghidra.sleigh.grammar.Location;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import org.junit.Test;
 
-class Score7SleighCompileTest {
-
-    @TempDir
-    Path tempDir;
+public class Score7SleighCompileTest {
 
     @Test
-    void score7ProcessorDefinitionCompilesWithGhidraSleigh() throws Exception {
+    public void score7ProcessorDefinitionCompilesWithGhidraSleigh() throws Exception {
         Path source = Path.of(
             "ghidra_processors",
             "SCORE7",
@@ -28,31 +23,38 @@ class Score7SleighCompileTest {
             "SCORE7.slaspec"
         ).toAbsolutePath();
 
-        assertTrue(Files.isRegularFile(source), "SCORE7.slaspec must exist");
+        assertTrue("SCORE7.slaspec must exist", Files.isRegularFile(source));
 
+        Path tempDir = Files.createTempDirectory("score7-sleigh-test-");
         Path output = tempDir.resolve("SCORE7.sla");
-        SleighCompileOptions options = SleighCompileOptions.parse(
-            new String[] { source.toString(), output.toString() }
-        );
+        try {
+            CapturingCompile compiler = new CapturingCompile();
+            int result = compiler.run_compilation(
+                source.toString(),
+                output.toString()
+            );
 
-        CapturingCompile compiler = new CapturingCompile();
-        compiler.setOptions(options);
-        int result = compiler.run_compilation(
-            options.inputFile.getPath(),
-            options.outputFile.getPath()
-        );
-
-        assertEquals(
-            0,
-            result,
-            () -> "SCORE7 SLEIGH compile failed:\n" + String.join("\n", compiler.diagnostics)
-        );
-        assertEquals(
-            0,
-            compiler.numErrors(),
-            () -> "SCORE7 SLEIGH errors:\n" + String.join("\n", compiler.diagnostics)
-        );
-        assertTrue(Files.size(output) > 0, "SCORE7.sla must be non-empty");
+            assertEquals(
+                "SCORE7 SLEIGH compile failed:\n" +
+                    String.join("\n", compiler.diagnostics),
+                0,
+                result
+            );
+            assertEquals(
+                "SCORE7 SLEIGH errors:\n" +
+                    String.join("\n", compiler.diagnostics),
+                0,
+                compiler.numErrors()
+            );
+            assertTrue(
+                "SCORE7.sla must be non-empty",
+                Files.isRegularFile(output) && Files.size(output) > 0
+            );
+        }
+        finally {
+            Files.deleteIfExists(output);
+            Files.deleteIfExists(tempDir);
+        }
     }
 
     private static final class CapturingCompile extends SleighCompile {
