@@ -18,23 +18,17 @@ define space register type=register_space size=4;
 define register offset=0x000 size=4
 [ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 ];
 
-# ABI aliases (GCC SCORE backend): r0=sp, r2=fp, r3=return address, r28=gp.
-define register offset=0x000 size=4 sp;
-define register offset=0x008 size=4 fp;
-define register offset=0x00c size=4 ra;
-define register offset=0x070 size=4 gp;
+# GCC SCORE ABI: r0=r0, r2=r2, r3=return address, r28=r28.
+# Keep one physical varnode per architectural register; ABI roles live in
+# SCORE7.cspec instead of duplicate SLEIGH register aliases.
 
 define register offset=0x100 size=4
 [ cr0 cr1 cr2 cr3 cr4 cr5 cr6 cr7 cr8 cr9 cr10 cr11 cr12 cr13 cr14 cr15 cr16 cr17 cr18 cr19 cr20 cr21 cr22 cr23 cr24 cr25 cr26 cr27 cr28 cr29 cr30 cr31 ];
 
-# Architecturally named control-register aliases.
-define register offset=0x100 size=4 psr;
-define register offset=0x104 size=4 cond;
-define register offset=0x108 size=4 ecr;
-define register offset=0x10c size=4 excpvec;
-define register offset=0x110 size=4 ccr;
-define register offset=0x114 size=4 epc;
-define register offset=0x118 size=4 ema;
+# Control registers remain canonical cr0..cr31. Their architectural names
+# (PSR, condition register, ECR, EXCPVEC, CCR, EPC, EMA, ...) are documented
+# in the module and can be surfaced by register markup without duplicate
+# varnodes.
 
 define register offset=0x200 size=4 [ sr0 sr1 sr2 ];
 define register offset=0x210 size=4 [ ceh cel ];
@@ -442,7 +436,7 @@ macro score_set_t(value) {
 
 # J-form major 2
 :j JTarget32 is p_lo=1 & p_hi=1 & major32=2 & cu=0 & JTarget32 { goto JTarget32; }
-:jl JTarget32 is p_lo=1 & p_hi=1 & major32=2 & cu=1 & JTarget32 { ra=inst_next; call JTarget32; }
+:jl JTarget32 is p_lo=1 & p_hi=1 & major32=2 & cu=1 & JTarget32 { r3=inst_next; call JTarget32; }
 
 # RIX pre-increment major 3
 :lw rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=0 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffc; rd32=*:4 a; }
@@ -532,7 +526,7 @@ macro score_set_t(value) {
 :push! PReg,preg_base is p16=0 & op16=2 & func16=14 & PReg & preg_base { preg_base=preg_base-4; local a:4=preg_base&0xfffffffc; *:4 a=PReg; }
 
 :j! JTarget16 is p16=0 & op16=3 & lk16=0 & JTarget16 { goto JTarget16; }
-:jl! JTarget16 is p16=0 & op16=3 & lk16=1 & JTarget16 { ra=inst_next; call JTarget16; }
+:jl! JTarget16 is p16=0 & op16=3 & lk16=1 & JTarget16 { r3=inst_next; call JTarget16; }
 
 :ldiu! rd16,imm8 is p16=0 & op16=5 & rd16 & imm8 { rd16=imm8; }
 
@@ -546,140 +540,140 @@ macro score_set_t(value) {
 :bittst! rd16,imm5 is p16=0 & op16=6 & i16_func3=6 & rd16 & imm5 { local v:4=rd16 & (1 << imm5); score_set_zn(v); }
 :bittgl! rd16,imm5 is p16=0 & op16=6 & i16_func3=7 & rd16 & imm5 { rd16=rd16 ^ (1 << imm5); score_set_zn(rd16); }
 
-:lwp! rd16,imm5 is p16=0 & op16=7 & i16_func3=0 & rd16 & imm5 { local a:4=(fp+(imm5<<2))&0xfffffffc; rd16=*:4 a; }
-:lhp! rd16,imm5 is p16=0 & op16=7 & i16_func3=1 & rd16 & imm5 { local a:4=(fp+(imm5<<1))&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
-:lbup! rd16,imm5 is p16=0 & op16=7 & i16_func3=3 & rd16 & imm5 { local a:4=fp+imm5; local v:1=*:1 a; rd16=zext(v); }
-:swp! rd16,imm5 is p16=0 & op16=7 & i16_func3=4 & rd16 & imm5 { local a:4=(fp+(imm5<<2))&0xfffffffc; *:4 a=rd16; }
-:shp! rd16,imm5 is p16=0 & op16=7 & i16_func3=5 & rd16 & imm5 { local a:4=(fp+(imm5<<1))&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
-:sbp! rd16,imm5 is p16=0 & op16=7 & i16_func3=7 & rd16 & imm5 { local a:4=fp+imm5; local v:1=rd16:1; *:1 a=v; }
+:lwp! rd16,imm5 is p16=0 & op16=7 & i16_func3=0 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; rd16=*:4 a; }
+:lhp! rd16,imm5 is p16=0 & op16=7 & i16_func3=1 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
+:lbup! rd16,imm5 is p16=0 & op16=7 & i16_func3=3 & rd16 & imm5 { local a:4=r2+imm5; local v:1=*:1 a; rd16=zext(v); }
+:swp! rd16,imm5 is p16=0 & op16=7 & i16_func3=4 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; *:4 a=rd16; }
+:shp! rd16,imm5 is p16=0 & op16=7 & i16_func3=5 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
+:sbp! rd16,imm5 is p16=0 & op16=7 & i16_func3=7 & rd16 & imm5 { local a:4=r2+imm5; local v:1=rd16:1; *:1 a=v; }
 
 :bcs BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=0 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bcsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=1 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bcsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=1 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bcs! BTarget16 is p16=0 & op16=4 & cond16=0 & BTarget16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brcs ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brcsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brcsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brcs! ra16 is p16=0 & op16=0 & func16=4 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brcsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brcsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bcc BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bccl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bccl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bcc! BTarget16 is p16=0 & op16=4 & cond16=1 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brcc ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brccl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brccl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brcc! ra16 is p16=0 & op16=0 & func16=4 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brccl! ra16 is p16=0 & op16=0 & func16=12 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brccl! ra16 is p16=0 & op16=0 & func16=12 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bgtu BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget32; <done> }
-:bgtul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; ra=inst_next; call BTarget32; <done> }
+:bgtul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call BTarget32; <done> }
 :bgtu! BTarget16 is p16=0 & op16=4 & cond16=2 & BTarget16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget16; <done> }
 :brgtu ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra32]; <done> }
-:brgtul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; ra=inst_next; call [ra32]; <done> }
+:brgtul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra32]; <done> }
 :brgtu! ra16 is p16=0 & op16=0 & func16=4 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra16]; <done> }
-:brgtul! ra16 is p16=0 & op16=0 & func16=12 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; ra=inst_next; call [ra16]; <done> }
+:brgtul! ra16 is p16=0 & op16=0 & func16=12 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra16]; <done> }
 
 :bleu BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bleul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bleul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bleu! BTarget16 is p16=0 & op16=4 & cond16=3 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brleu ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brleul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brleul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brleu! ra16 is p16=0 & op16=0 & func16=4 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brleul! ra16 is p16=0 & op16=0 & func16=12 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brleul! ra16 is p16=0 & op16=0 & func16=12 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :beq BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:beql BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:beql BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :beq! BTarget16 is p16=0 & op16=4 & cond16=4 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :breq ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:breql ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:breql ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :breq! ra16 is p16=0 & op16=0 & func16=4 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:breql! ra16 is p16=0 & op16=0 & func16=12 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:breql! ra16 is p16=0 & op16=0 & func16=12 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bne BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=0 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bnel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=1 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bnel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=1 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bne! BTarget16 is p16=0 & op16=4 & cond16=5 & BTarget16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brne ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brnel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brnel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brne! ra16 is p16=0 & op16=0 & func16=4 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brnel! ra16 is p16=0 & op16=0 & func16=12 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brnel! ra16 is p16=0 & op16=0 & func16=12 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bgt BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget32; <done> }
-:bgtl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; ra=inst_next; call BTarget32; <done> }
+:bgtl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call BTarget32; <done> }
 :bgt! BTarget16 is p16=0 & op16=4 & cond16=6 & BTarget16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget16; <done> }
 :brgt ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra32]; <done> }
-:brgtl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; ra=inst_next; call [ra32]; <done> }
+:brgtl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra32]; <done> }
 :brgt! ra16 is p16=0 & op16=0 & func16=4 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra16]; <done> }
-:brgtl! ra16 is p16=0 & op16=0 & func16=12 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; ra=inst_next; call [ra16]; <done> }
+:brgtl! ra16 is p16=0 & op16=0 & func16=12 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra16]; <done> }
 
 :ble BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:blel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:blel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :ble! BTarget16 is p16=0 & op16=4 & cond16=7 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brle ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brlel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brlel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brle! ra16 is p16=0 & op16=0 & func16=4 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brlel! ra16 is p16=0 & op16=0 & func16=12 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brlel! ra16 is p16=0 & op16=0 & func16=12 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bge BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=0 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bgel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=1 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bgel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=1 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bge! BTarget16 is p16=0 & op16=4 & cond16=8 & BTarget16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brge ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brgel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brgel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brge! ra16 is p16=0 & op16=0 & func16=4 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brgel! ra16 is p16=0 & op16=0 & func16=12 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brgel! ra16 is p16=0 & op16=0 & func16=12 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :blt BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=0 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bltl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=1 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bltl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=1 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :blt! BTarget16 is p16=0 & op16=4 & cond16=9 & BTarget16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brlt ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brltl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brltl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brlt! ra16 is p16=0 & op16=0 & func16=4 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brltl! ra16 is p16=0 & op16=0 & func16=12 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brltl! ra16 is p16=0 & op16=0 & func16=12 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bmi BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=0 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bmil BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=1 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bmil BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=1 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bmi! BTarget16 is p16=0 & op16=4 & cond16=10 & BTarget16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brmi ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brmil ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brmil ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brmi! ra16 is p16=0 & op16=0 & func16=4 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brmil! ra16 is p16=0 & op16=0 & func16=12 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brmil! ra16 is p16=0 & op16=0 & func16=12 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bpl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=0 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bpll BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=1 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bpll BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=1 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bpl! BTarget16 is p16=0 & op16=4 & cond16=11 & BTarget16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brpl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brpll ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brpll ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brpl! ra16 is p16=0 & op16=0 & func16=4 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brpll! ra16 is p16=0 & op16=0 & func16=12 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brpll! ra16 is p16=0 & op16=0 & func16=12 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bvs BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=0 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bvsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=1 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bvsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=1 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bvs! BTarget16 is p16=0 & op16=4 & cond16=12 & BTarget16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brvs ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brvsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brvsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brvs! ra16 is p16=0 & op16=0 & func16=4 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brvsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brvsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bvc BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=0 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bvcl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=1 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> ra=inst_next; call BTarget32; <done> }
+:bvcl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=1 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
 :bvc! BTarget16 is p16=0 & op16=4 & cond16=13 & BTarget16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
 :brvc ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brvcl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra32]; <done> }
+:brvcl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
 :brvc! ra16 is p16=0 & op16=0 & func16=4 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brvcl! ra16 is p16=0 & op16=0 & func16=12 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> ra=inst_next; call [ra16]; <done> }
+:brvcl! ra16 is p16=0 & op16=0 & func16=12 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
 :bcnz BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=0 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget32; <done> }
-:bcnzl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=1 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; ra=inst_next; call BTarget32; <done> }
+:bcnzl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=1 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call BTarget32; <done> }
 :bcnz! BTarget16 is p16=0 & op16=4 & cond16=14 & BTarget16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget16; <done> }
 :brcnz ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra32]; <done> }
-:brcnzl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; ra=inst_next; call [ra32]; <done> }
+:brcnzl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra32]; <done> }
 :brcnz! ra16 is p16=0 & op16=0 & func16=4 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra16]; <done> }
-:brcnzl! ra16 is p16=0 & op16=0 & func16=12 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; ra=inst_next; call [ra16]; <done> }
+:brcnzl! ra16 is p16=0 & op16=0 & func16=12 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra16]; <done> }
 
 :b BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=0 & BTarget32 { goto BTarget32; }
-:bl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=1 & BTarget32 { ra=inst_next; call BTarget32; }
+:bl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=1 & BTarget32 { r3=inst_next; call BTarget32; }
 :b! BTarget16 is p16=0 & op16=4 & cond16=15 & BTarget16 { goto BTarget16; }
 :br ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=15 & ra32 { goto [ra32]; }
-:brl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=15 & ra32 { ra=inst_next; call [ra32]; }
+:brl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=15 & ra32 { r3=inst_next; call [ra32]; }
 :br! ra16 is p16=0 & op16=0 & func16=4 & rd16=15 & ra16 { goto [ra16]; }
-:brl! ra16 is p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { ra=inst_next; call [ra16]; }
+:brl! ra16 is p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { r3=inst_next; call [ra16]; }
 
 :tcs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 :mvcs rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=0 & rd32 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
