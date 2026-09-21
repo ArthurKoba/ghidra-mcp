@@ -96,6 +96,13 @@ RUN apt-get update && apt-get install -y \
 # Copy Ghidra from builder
 COPY --from=builder /opt/ghidra /opt/ghidra
 
+# Install the native Sunplus S+CORE 7 processor definition and compile its
+# SLEIGH source with the exact Ghidra version shipped by this image.
+COPY ghidra_processors/SCORE7 /opt/ghidra/Ghidra/Processors/SCORE7
+RUN /opt/ghidra/support/sleigh /opt/ghidra/Ghidra/Processors/SCORE7/data/languages/SCORE7.slaspec \
+    && test -s /opt/ghidra/Ghidra/Processors/SCORE7/data/languages/SCORE7.sla
+
+
 # Install the Jython extension shipped in the Ghidra 12.1 distribution:
 # starting with 12.1 it is no longer enabled by default and must be
 # unpacked into Ghidra/Extensions/ to be picked up at startup.

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<language_definitions>
+  <language processor="SCORE7"
+            endian="little"
+            instructionEndian="little"
+            size="32"
+            variant="default"
+            version="1.0"
+            slafile="SCORE7.sla"
+            processorspec="SCORE7.pspec"
+            id="SCORE7:LE:32:default">
+    <description>Sunplus S+CORE 7 32-bit RISC (16/32-bit variable instructions)</description>
+    <compiler name="default" spec="SCORE7.cspec" id="default"/>
+    <external_name tool="gnu" name="score7"/>
+  </language>
+</language_definitions>
