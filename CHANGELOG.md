@@ -12,6 +12,17 @@ Complete version history for the Ghidra MCP Server project.
 - Fixed the generated `SCORE7.sla` permissions so the unprivileged Ghidra runtime user can load `SCORE7:LE:32:default`.
 - Docker build now verifies the compiled `.sla` and language definition are readable after switching to runtime UID/GID `1000:1000`.
 
+### SCORE7 processor decode fix
+
+- Fixed mixed 16/32-bit SCORE7 disassembly when `PC & 2` is set: packet-wide
+  32-bit/PCE/parity constructors can no longer read across the next 4-byte
+  packet boundary.
+- The SLEIGH root decoder now derives a transient halfword phase from
+  `inst_start`, matching the forced 16-bit boundary behavior used by the
+  current MAME SCORE7 core and GNU binutils disassembler.
+- Added regression guards for all packet-wide constructors while retaining the
+  existing instruction table and execution semantics.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was
