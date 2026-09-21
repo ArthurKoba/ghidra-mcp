@@ -29,6 +29,7 @@ Complete version history for the Ghidra MCP Server project.
   operations instead of generic indirect jumps, so Ghidra can terminate
   functions and build correct decompiler control flow.
 - Keep the generic `br` / `br!` constructors for non-return indirect branches.
+- Preserve `r3` as a real disassembly operand for both return forms so GUI and MCP listings retain the architectural return register.
 
 ### Tool consolidation (breaking) — 272 → 251 tools
 
