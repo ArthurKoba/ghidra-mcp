@@ -126,13 +126,25 @@ public class Score7SleighCompileTest {
         assertTrue(
             "32-bit br r3 must be modeled as an ABI return",
             lines.stream().anyMatch(line ->
-                line.startsWith(":br \"r3\" is ") && line.contains("{ return [r3]; }")
+                line.startsWith(":br ReturnReg32 is ") && line.contains("{ return [ReturnReg32]; }")
             )
         );
         assertTrue(
             "16-bit br! r3 must be modeled as an ABI return",
             lines.stream().anyMatch(line ->
-                line.startsWith(":br! \"r3\" is ") && line.contains("{ return [r3]; }")
+                line.startsWith(":br! ReturnReg16 is ") && line.contains("{ return [ReturnReg16]; }")
+            )
+        );
+        assertTrue(
+            "32-bit return operand must export architectural r3",
+            lines.stream().anyMatch(line ->
+                line.startsWith("ReturnReg32: r3 is ") && line.contains("{ export r3; }")
+            )
+        );
+        assertTrue(
+            "16-bit return operand must export architectural r3",
+            lines.stream().anyMatch(line ->
+                line.startsWith("ReturnReg16: r3 is ") && line.contains("{ export r3; }")
             )
         );
         assertTrue(
