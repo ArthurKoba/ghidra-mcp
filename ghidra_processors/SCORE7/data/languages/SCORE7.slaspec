@@ -690,8 +690,10 @@ macro score_set_t(value) {
 :b BTarget32 is decode_phase=1 & packet_half=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=0 & BTarget32 { goto BTarget32; }
 :bl BTarget32 is decode_phase=1 & packet_half=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=1 & BTarget32 { r3=inst_next; call BTarget32; }
 :b! BTarget16 is decode_phase=1 & p16=0 & op16=4 & cond16=15 & BTarget16 { goto BTarget16; }
+:br "r3" is decode_phase=1 & packet_half=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=15 & ra32=3 { return [r3]; }
 :br ra32 is decode_phase=1 & packet_half=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=15 & ra32 { goto [ra32]; }
 :brl ra32 is decode_phase=1 & packet_half=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=15 & ra32 { r3=inst_next; call [ra32]; }
+:br! "r3" is decode_phase=1 & p16=0 & op16=0 & func16=4 & rd16=15 & ra16=3 { return [r3]; }
 :br! ra16 is decode_phase=1 & p16=0 & op16=0 & func16=4 & rd16=15 & ra16 { goto [ra16]; }
 :brl! ra16 is decode_phase=1 & p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { r3=inst_next; call [ra16]; }
 
