@@ -34,6 +34,15 @@ define register offset=0x200 size=4 [ sr0 sr1 sr2 ];
 define register offset=0x210 size=4 [ ceh cel ];
 define register offset=0x300 size=4 pc;
 
+// SCORE7 long instructions and PCE packets may only begin at 4-byte packet
+// boundaries.  Ghidra's instruction alignment is 2 bytes because ordinary
+// compact instructions can start at +2, so derive the packet phase from the
+// actual instruction address before matching the instruction subtable.
+define register offset=0x304 size=4 score_context;
+define context score_context
+    packet_phase=(0,0) noflow
+;
+
 # System/custom operations whose architectural side effects are not modeled
 # by the permissive reference implementation.
 define pcodeop score_syscall;
@@ -268,13 +277,23 @@ macro score_set_t(value) {
     cr1 = (cr1 & 0xffffffef) | (zext(t) << 4);
 }
 
+# ----- address phase / root instruction wrapper -----
+
+ScorePhase: is epsilon
+    [ packet_phase = (inst_start >> 1) $and 1; ]
+    { }
+
+:^ScoreInstruction is ScorePhase & ScoreInstruction {
+    build ScoreInstruction;
+}
+
 # ----- parity / parallel encoding guards -----
 
-:parity_error is p_lo=1 & p_hi=0 {
+ScoreInstruction:parity_error is packet_phase=0 & p_lo=1 & p_hi=0 {
     score_parity_error();
 }
 
-:pce pce_lo, pce_hi is p_lo=0 & p_hi=1 & pce_lo & pce_hi {
+ScoreInstruction:pce pce_lo, pce_hi is packet_phase=0 & p_lo=0 & p_hi=1 & pce_lo & pce_hi {
     score_pce();
 }
 
@@ -283,43 +302,43 @@ macro score_set_t(value) {
 # ===========================================================================
 
 # Special form (major 0)
-:nop is p_lo=1 & p_hi=1 & major32=0 & func6=0 & cu=0 { }
-:syscall rd32 is p_lo=1 & p_hi=1 & major32=0 & func6=1 & rd32 { score_syscall(); }
-:sdbbp ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=3 & ra32 { score_debug_break(); }
-:pflush is p_lo=1 & p_hi=1 & major32=0 & func6=5 { score_pflush(); }
+ScoreInstruction:nop is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=0 & cu=0 { }
+ScoreInstruction:syscall rd32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=1 & rd32 { score_syscall(); }
+ScoreInstruction:sdbbp ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=3 & ra32 { score_debug_break(); }
+ScoreInstruction:pflush is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=5 { score_pflush(); }
 
-:add rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=8 & cu=0 & rd32 & ra32 & rb32 {
+ScoreInstruction:add rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=8 & cu=0 & rd32 & ra32 & rb32 {
     rd32 = ra32 + rb32;
 }
-:add.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=8 & cu=1 & rd32 & ra32 & rb32 {
+ScoreInstruction:add.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=8 & cu=1 & rd32 & ra32 & rb32 {
     local result:4 = ra32 + rb32;
     score_set_add_flags(ra32,rb32,result);
     rd32 = result;
 }
-:addc rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=9 & cu=0 & rd32 & ra32 & rb32 {
+ScoreInstruction:addc rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=9 & cu=0 & rd32 & ra32 & rb32 {
     local c:4 = (cr1 >> 1) & 1;
     rd32 = ra32 + rb32 + c;
 }
-:addc.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=9 & cu=1 & rd32 & ra32 & rb32 {
+ScoreInstruction:addc.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=9 & cu=1 & rd32 & ra32 & rb32 {
     local c:4 = (cr1 >> 1) & 1;
     local op2:4 = rb32 + c;
     local result:4 = ra32 + op2;
     score_set_add_flags(ra32,op2,result);
     rd32 = result;
 }
-:sub rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=10 & cu=0 & rd32 & ra32 & rb32 {
+ScoreInstruction:sub rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=10 & cu=0 & rd32 & ra32 & rb32 {
     rd32 = ra32 - rb32;
 }
-:sub.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=10 & cu=1 & rd32 & ra32 & rb32 {
+ScoreInstruction:sub.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=10 & cu=1 & rd32 & ra32 & rb32 {
     local result:4 = ra32 - rb32;
     score_set_sub_flags(ra32,rb32,result);
     rd32 = result;
 }
-:subc rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=11 & cu=0 & rd32 & ra32 & rb32 {
+ScoreInstruction:subc rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=11 & cu=0 & rd32 & ra32 & rb32 {
     local c:4 = (cr1 >> 1) & 1;
     rd32 = ra32 - rb32 - (1-c);
 }
-:subc.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=11 & cu=1 & rd32 & ra32 & rb32 {
+ScoreInstruction:subc.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=11 & cu=1 & rd32 & ra32 & rb32 {
     local c:4 = (cr1 >> 1) & 1;
     local borrow:4 = 1-c;
     local op1:4 = ra32-borrow;
@@ -327,413 +346,413 @@ macro score_set_t(value) {
     score_set_sub_flags(op1,rb32,result);
     rd32=result;
 }
-:cmp.c ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=12 & cu=1 & rd32=0 & ra32 & rb32 {
+ScoreInstruction:cmp.c ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=12 & cu=1 & rd32=0 & ra32 & rb32 {
     local result:4=ra32-rb32;
     score_set_sub_flags(ra32,rb32,result);
     score_set_t(result==0);
 }
-:cmpz.c ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=13 & cu=1 & rd32=0 & ra32 {
+ScoreInstruction:cmpz.c ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=13 & cu=1 & rd32=0 & ra32 {
     local result:4=ra32;
     score_set_sub_flags(ra32,0:4,result);
     score_set_t(result==0);
 }
-:neg rd32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=15 & cu=0 & rd32 & rb32 {
+ScoreInstruction:neg rd32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=15 & cu=0 & rd32 & rb32 {
     rd32=0-rb32;
 }
-:neg.c rd32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=15 & cu=1 & rd32 & rb32 {
+ScoreInstruction:neg.c rd32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=15 & cu=1 & rd32 & rb32 {
     local result:4=0-rb32;
     score_set_sub_flags(0:4,rb32,result);
     rd32=result;
 }
-:and rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=16 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 & rb32; }
-:and.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=16 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 & rb32; score_set_zn(rd32); }
-:or rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=17 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 | rb32; }
-:or.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=17 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 | rb32; score_set_zn(rd32); }
-:not rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=18 & cu=0 & rd32 & ra32 { rd32=~ra32; }
-:not.c rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=18 & cu=1 & rd32 & ra32 { rd32=~ra32; score_set_zn(rd32); }
-:xor rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=19 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 ^ rb32; }
-:xor.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=19 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 ^ rb32; score_set_zn(rd32); }
+ScoreInstruction:and rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=16 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 & rb32; }
+ScoreInstruction:and.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=16 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 & rb32; score_set_zn(rd32); }
+ScoreInstruction:or rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=17 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 | rb32; }
+ScoreInstruction:or.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=17 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 | rb32; score_set_zn(rd32); }
+ScoreInstruction:not rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=18 & cu=0 & rd32 & ra32 { rd32=~ra32; }
+ScoreInstruction:not.c rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=18 & cu=1 & rd32 & ra32 { rd32=~ra32; score_set_zn(rd32); }
+ScoreInstruction:xor rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=19 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 ^ rb32; }
+ScoreInstruction:xor.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=19 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 ^ rb32; score_set_zn(rd32); }
 
-:bitclr rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=20 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 & ~(1 << sh); }
-:bitclr.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=20 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 & ~(1 << sh); score_set_zn(rd32); }
-:bitset rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=21 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 | (1 << sh); }
-:bitset.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=21 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 | (1 << sh); score_set_zn(rd32); }
-:bittst.c ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=22 & cu=1 & ra32 & rb32 { local sh:4=rb32 & 31; local v:4=ra32 & (1 << sh); score_set_zn(v); }
-:bittgl rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=23 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 ^ (1 << sh); }
-:bittgl.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=23 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 ^ (1 << sh); score_set_zn(rd32); }
+ScoreInstruction:bitclr rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=20 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 & ~(1 << sh); }
+ScoreInstruction:bitclr.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=20 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 & ~(1 << sh); score_set_zn(rd32); }
+ScoreInstruction:bitset rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=21 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 | (1 << sh); }
+ScoreInstruction:bitset.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=21 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 | (1 << sh); score_set_zn(rd32); }
+ScoreInstruction:bittst.c ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=22 & cu=1 & ra32 & rb32 { local sh:4=rb32 & 31; local v:4=ra32 & (1 << sh); score_set_zn(v); }
+ScoreInstruction:bittgl rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=23 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 ^ (1 << sh); }
+ScoreInstruction:bittgl.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=23 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 ^ (1 << sh); score_set_zn(rd32); }
 
-:sll rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=24 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 << sh; }
-:sll.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=24 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 << sh; score_set_zn(rd32); }
-:srl rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=26 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 >> sh; }
-:srl.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=26 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 >> sh; score_set_zn(rd32); }
-:sra rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=27 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 s>> sh; }
-:sra.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=27 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 s>> sh; score_set_zn(rd32); }
+ScoreInstruction:sll rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=24 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 << sh; }
+ScoreInstruction:sll.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=24 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 << sh; score_set_zn(rd32); }
+ScoreInstruction:srl rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=26 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 >> sh; }
+ScoreInstruction:srl.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=26 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 >> sh; score_set_zn(rd32); }
+ScoreInstruction:sra rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=27 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 s>> sh; }
+ScoreInstruction:sra.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=27 & cu=1 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=ra32 s>> sh; score_set_zn(rd32); }
 
-:ror rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=28 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 >> sh) | (ra32 << (32-sh)); }
-:rol rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=30 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 << sh) | (ra32 >> (32-sh)); }
-:rorc rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=29 & rd32 & ra32 & rb32 { score_custom_engine(); }
-:rolc rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=31 & rd32 & ra32 & rb32 { score_custom_engine(); }
+ScoreInstruction:ror rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=28 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 >> sh) | (ra32 << (32-sh)); }
+ScoreInstruction:rol rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=30 & cu=0 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 << sh) | (ra32 >> (32-sh)); }
+ScoreInstruction:rorc rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=29 & rd32 & ra32 & rb32 { score_custom_engine(); }
+ScoreInstruction:rolc rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=31 & rd32 & ra32 & rb32 { score_custom_engine(); }
 
-:mul ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=32 & ra32 & rb32 {
+ScoreInstruction:mul ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=32 & ra32 & rb32 {
     local a:8=sext(ra32); local b:8=sext(rb32); local product:8=a*b;
     cel=product:4;
     local upper:8=product >> 32;
     ceh=upper:4;
 }
-:mulu ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=33 & ra32 & rb32 {
+ScoreInstruction:mulu ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=33 & ra32 & rb32 {
     local a:8=zext(ra32); local b:8=zext(rb32); local product:8=a*b;
     cel=product:4;
     local upper:8=product >> 32;
     ceh=upper:4;
 }
-:div ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=34 & ra32 & rb32 {
+ScoreInstruction:div ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=34 & ra32 & rb32 {
     if (rb32 == 0) goto <bad>; cel=ra32 s/ rb32; ceh=ra32 s% rb32; goto <done>;
     <bad> score_trap();
     <done>
 }
-:divu ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=35 & ra32 & rb32 {
+ScoreInstruction:divu ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=35 & ra32 & rb32 {
     if (rb32 == 0) goto <bad>; cel=ra32 / rb32; ceh=ra32 % rb32; goto <done>;
     <bad> score_trap();
     <done>
 }
 
-:extsb rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=44 & cu=0 & rd32 & ra32 { local v:1=ra32:1; rd32=sext(v); }
-:extsh rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=45 & cu=0 & rd32 & ra32 { local v:2=ra32:2; rd32=sext(v); }
-:extzb rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=46 & cu=0 & rd32 & ra32 { local v:1=ra32:1; rd32=zext(v); }
-:extzh rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=47 & cu=0 & rd32 & ra32 { local v:2=ra32:2; rd32=zext(v); }
-:extsb.c rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=44 & cu=1 & rd32 & ra32 { local v:1=ra32:1; rd32=sext(v); score_set_zn(rd32); }
-:extsh.c rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=45 & cu=1 & rd32 & ra32 { local v:2=ra32:2; rd32=sext(v); score_set_zn(rd32); }
-:extzb.c rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=46 & cu=1 & rd32 & ra32 { local v:1=ra32:1; rd32=zext(v); score_set_zn(rd32); }
-:extzh.c rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=47 & cu=1 & rd32 & ra32 { local v:2=ra32:2; rd32=zext(v); score_set_zn(rd32); }
+ScoreInstruction:extsb rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=44 & cu=0 & rd32 & ra32 { local v:1=ra32:1; rd32=sext(v); }
+ScoreInstruction:extsh rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=45 & cu=0 & rd32 & ra32 { local v:2=ra32:2; rd32=sext(v); }
+ScoreInstruction:extzb rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=46 & cu=0 & rd32 & ra32 { local v:1=ra32:1; rd32=zext(v); }
+ScoreInstruction:extzh rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=47 & cu=0 & rd32 & ra32 { local v:2=ra32:2; rd32=zext(v); }
+ScoreInstruction:extsb.c rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=44 & cu=1 & rd32 & ra32 { local v:1=ra32:1; rd32=sext(v); score_set_zn(rd32); }
+ScoreInstruction:extsh.c rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=45 & cu=1 & rd32 & ra32 { local v:2=ra32:2; rd32=sext(v); score_set_zn(rd32); }
+ScoreInstruction:extzb.c rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=46 & cu=1 & rd32 & ra32 { local v:1=ra32:1; rd32=zext(v); score_set_zn(rd32); }
+ScoreInstruction:extzh.c rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=47 & cu=1 & rd32 & ra32 { local v:2=ra32:2; rd32=zext(v); score_set_zn(rd32); }
 
-:lcb ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=48 & ra32 { score_custom_engine(); }
-:lcw rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=49 & rd32 & ra32 { score_custom_engine(); }
-:lce rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=51 & rd32 & ra32 { score_custom_engine(); }
-:scb rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=52 & rd32 & ra32 { score_custom_engine(); }
-:scw rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=53 & rd32 & ra32 { score_custom_engine(); }
-:sce ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=55 & ra32 { score_custom_engine(); }
+ScoreInstruction:lcb ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=48 & ra32 { score_custom_engine(); }
+ScoreInstruction:lcw rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=49 & rd32 & ra32 { score_custom_engine(); }
+ScoreInstruction:lce rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=51 & rd32 & ra32 { score_custom_engine(); }
+ScoreInstruction:scb rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=52 & rd32 & ra32 { score_custom_engine(); }
+ScoreInstruction:scw rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=53 & rd32 & ra32 { score_custom_engine(); }
+ScoreInstruction:sce ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=55 & ra32 { score_custom_engine(); }
 
-:slli rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=56 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 << rb32; }
-:srli rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=58 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 >> rb32; }
-:srai rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=59 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 s>> rb32; }
-:slli.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=56 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 << rb32; score_set_zn(rd32); }
-:srli.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=58 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 >> rb32; score_set_zn(rd32); }
-:srai.c rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=59 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 s>> rb32; score_set_zn(rd32); }
-:rori rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=60 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 >> sh)|(ra32 << (32-sh)); }
-:roli rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=62 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 << sh)|(ra32 >> (32-sh)); }
-:roric rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=61 & rd32 & ra32 & rb32 { score_custom_engine(); }
-:rolic rd32,ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=63 & rd32 & ra32 & rb32 { score_custom_engine(); }
+ScoreInstruction:slli rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=56 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 << rb32; }
+ScoreInstruction:srli rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=58 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 >> rb32; }
+ScoreInstruction:srai rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=59 & cu=0 & rd32 & ra32 & rb32 { rd32=ra32 s>> rb32; }
+ScoreInstruction:slli.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=56 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 << rb32; score_set_zn(rd32); }
+ScoreInstruction:srli.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=58 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 >> rb32; score_set_zn(rd32); }
+ScoreInstruction:srai.c rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=59 & cu=1 & rd32 & ra32 & rb32 { rd32=ra32 s>> rb32; score_set_zn(rd32); }
+ScoreInstruction:rori rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=60 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 >> sh)|(ra32 << (32-sh)); }
+ScoreInstruction:roli rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=62 & rd32 & ra32 & rb32 { local sh:4=rb32 & 31; rd32=(ra32 << sh)|(ra32 >> (32-sh)); }
+ScoreInstruction:roric rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=61 & rd32 & ra32 & rb32 { score_custom_engine(); }
+ScoreInstruction:rolic rd32,ra32,rb32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=63 & rd32 & ra32 & rb32 { score_custom_engine(); }
 
 # I-form-1 major 1
-:addi rd32,SImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=0 & cu=0 & rd32 & SImm16 { rd32=rd32+SImm16; }
-:addi.c rd32,SImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=0 & cu=1 & rd32 & SImm16 { local old:4=rd32; local result:4=old+SImm16; score_set_add_flags(old,SImm16,result); rd32=result; }
-:cmpi.c rd32,SImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=2 & cu=1 & rd32 & SImm16 { local result:4=rd32-SImm16; score_set_sub_flags(rd32,SImm16,result); }
-:andi rd32,UImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=4 & cu=0 & rd32 & UImm16 { rd32=rd32 & UImm16; }
-:andi.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=4 & cu=1 & rd32 & UImm16 { rd32=rd32 & UImm16; score_set_zn(rd32); }
-:ori rd32,UImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=5 & cu=0 & rd32 & UImm16 { rd32=rd32 | UImm16; }
-:ori.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=5 & cu=1 & rd32 & UImm16 { rd32=rd32 | UImm16; score_set_zn(rd32); }
-:ldi rd32,SImm16 is p_lo=1 & p_hi=1 & major32=1 & ifunc3=6 & rd32 & SImm16 { rd32=SImm16; }
+ScoreInstruction:addi rd32,SImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=0 & cu=0 & rd32 & SImm16 { rd32=rd32+SImm16; }
+ScoreInstruction:addi.c rd32,SImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=0 & cu=1 & rd32 & SImm16 { local old:4=rd32; local result:4=old+SImm16; score_set_add_flags(old,SImm16,result); rd32=result; }
+ScoreInstruction:cmpi.c rd32,SImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=2 & cu=1 & rd32 & SImm16 { local result:4=rd32-SImm16; score_set_sub_flags(rd32,SImm16,result); }
+ScoreInstruction:andi rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=4 & cu=0 & rd32 & UImm16 { rd32=rd32 & UImm16; }
+ScoreInstruction:andi.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=4 & cu=1 & rd32 & UImm16 { rd32=rd32 & UImm16; score_set_zn(rd32); }
+ScoreInstruction:ori rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=5 & cu=0 & rd32 & UImm16 { rd32=rd32 | UImm16; }
+ScoreInstruction:ori.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=5 & cu=1 & rd32 & UImm16 { rd32=rd32 | UImm16; score_set_zn(rd32); }
+ScoreInstruction:ldi rd32,SImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=1 & ifunc3=6 & rd32 & SImm16 { rd32=SImm16; }
 
 # J-form major 2
-:j JTarget32 is p_lo=1 & p_hi=1 & major32=2 & cu=0 & JTarget32 { goto JTarget32; }
-:jl JTarget32 is p_lo=1 & p_hi=1 & major32=2 & cu=1 & JTarget32 { r3=inst_next; call JTarget32; }
+ScoreInstruction:j JTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=2 & cu=0 & JTarget32 { goto JTarget32; }
+ScoreInstruction:jl JTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=2 & cu=1 & JTarget32 { r3=inst_next; call JTarget32; }
 
 # RIX pre-increment major 3
-:lw rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=0 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffc; rd32=*:4 a; }
-:lh rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=1 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=sext(v); }
-:lhu rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=2 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=zext(v); }
-:lb rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=3 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=*:1 ra32; rd32=sext(v); }
-:sw rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=4 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffc; *:4 a=rd32; }
-:sh rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=5 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=rd32:2; *:2 a=v; }
-:lbu rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=6 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=*:1 ra32; rd32=zext(v); }
-:sb rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=3 & rix_func3=7 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=rd32:1; *:1 ra32=v; }
+ScoreInstruction:lw rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=0 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffc; rd32=*:4 a; }
+ScoreInstruction:lh rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=1 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=sext(v); }
+ScoreInstruction:lhu rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=2 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=zext(v); }
+ScoreInstruction:lb rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=3 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=*:1 ra32; rd32=sext(v); }
+ScoreInstruction:sw rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=4 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffc; *:4 a=rd32; }
+ScoreInstruction:sh rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=5 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local a:4=ra32 & 0xfffffffe; local v:2=rd32:2; *:2 a=v; }
+ScoreInstruction:lbu rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=6 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=*:1 ra32; rd32=zext(v); }
+ScoreInstruction:sb rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=3 & rix_func3=7 & rd32 & ra32 & SImm12 { ra32=ra32+SImm12; local v:1=rd32:1; *:1 ra32=v; }
 
 # I-form-2 major 5
-:addis rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=0 & cu=0 & rd32 & UImm16 { rd32=rd32+(UImm16<<16); }
-:addis.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=0 & cu=1 & rd32 & UImm16 { local old:4=rd32; local imm:4=UImm16<<16; local result:4=old+imm; score_set_add_flags(old,imm,result); rd32=result; }
-:cmpis.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=2 & cu=1 & rd32 & UImm16 { local imm:4=UImm16<<16; local result:4=rd32-imm; score_set_sub_flags(rd32,imm,result); }
-:andis rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=4 & cu=0 & rd32 & UImm16 { rd32=rd32 & (UImm16<<16); }
-:andis.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=4 & cu=1 & rd32 & UImm16 { rd32=rd32 & (UImm16<<16); score_set_zn(rd32); }
-:oris rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=5 & cu=0 & rd32 & UImm16 { rd32=rd32 | (UImm16<<16); }
-:oris.c rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=5 & cu=1 & rd32 & UImm16 { rd32=rd32 | (UImm16<<16); score_set_zn(rd32); }
-:ldis rd32,UImm16 is p_lo=1 & p_hi=1 & major32=5 & ifunc3=6 & rd32 & UImm16 { rd32=UImm16<<16; }
+ScoreInstruction:addis rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=0 & cu=0 & rd32 & UImm16 { rd32=rd32+(UImm16<<16); }
+ScoreInstruction:addis.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=0 & cu=1 & rd32 & UImm16 { local old:4=rd32; local imm:4=UImm16<<16; local result:4=old+imm; score_set_add_flags(old,imm,result); rd32=result; }
+ScoreInstruction:cmpis.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=2 & cu=1 & rd32 & UImm16 { local imm:4=UImm16<<16; local result:4=rd32-imm; score_set_sub_flags(rd32,imm,result); }
+ScoreInstruction:andis rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=4 & cu=0 & rd32 & UImm16 { rd32=rd32 & (UImm16<<16); }
+ScoreInstruction:andis.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=4 & cu=1 & rd32 & UImm16 { rd32=rd32 & (UImm16<<16); score_set_zn(rd32); }
+ScoreInstruction:oris rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=5 & cu=0 & rd32 & UImm16 { rd32=rd32 | (UImm16<<16); }
+ScoreInstruction:oris.c rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=5 & cu=1 & rd32 & UImm16 { rd32=rd32 | (UImm16<<16); score_set_zn(rd32); }
+ScoreInstruction:ldis rd32,UImm16 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=5 & ifunc3=6 & rd32 & UImm16 { rd32=UImm16<<16; }
 
 # CR-form major 6
-:mtcr rd32,cr_idx is p_lo=1 & p_hi=1 & major32=6 & cr_op=0 & rd32 & cr_idx { cr_idx=rd32; }
-:mfcr rd32,cr_idx is p_lo=1 & p_hi=1 & major32=6 & cr_op=1 & rd32 & cr_idx { rd32=cr_idx; }
-:rte is p_lo=1 & p_hi=1 & major32=6 & cr_op=0x84 { return [cr5]; }
+ScoreInstruction:mtcr rd32,cr_idx is packet_phase=0 & p_lo=1 & p_hi=1 & major32=6 & cr_op=0 & rd32 & cr_idx { cr_idx=rd32; }
+ScoreInstruction:mfcr rd32,cr_idx is packet_phase=0 & p_lo=1 & p_hi=1 & major32=6 & cr_op=1 & rd32 & cr_idx { rd32=cr_idx; }
+ScoreInstruction:rte is packet_phase=0 & p_lo=1 & p_hi=1 & major32=6 & cr_op=0x84 { return [cr5]; }
 
 # RIX post-increment major 7
-:lw rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=0 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffc; rd32=*:4 a; ra32=ra32+SImm12; }
-:lh rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=1 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=sext(v); ra32=ra32+SImm12; }
-:lhu rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=2 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=zext(v); ra32=ra32+SImm12; }
-:lb rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=3 & rd32 & ra32 & SImm12 { local v:1=*:1 ra32; rd32=sext(v); ra32=ra32+SImm12; }
-:sw rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=4 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffc; *:4 a=rd32; ra32=ra32+SImm12; }
-:sh rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=5 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=rd32:2; *:2 a=v; ra32=ra32+SImm12; }
-:lbu rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=6 & rd32 & ra32 & SImm12 { local v:1=*:1 ra32; rd32=zext(v); ra32=ra32+SImm12; }
-:sb rd32,ra32,SImm12 is p_lo=1 & p_hi=1 & major32=7 & rix_func3=7 & rd32 & ra32 & SImm12 { local v:1=rd32:1; *:1 ra32=v; ra32=ra32+SImm12; }
+ScoreInstruction:lw rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=0 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffc; rd32=*:4 a; ra32=ra32+SImm12; }
+ScoreInstruction:lh rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=1 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=sext(v); ra32=ra32+SImm12; }
+ScoreInstruction:lhu rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=2 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=*:2 a; rd32=zext(v); ra32=ra32+SImm12; }
+ScoreInstruction:lb rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=3 & rd32 & ra32 & SImm12 { local v:1=*:1 ra32; rd32=sext(v); ra32=ra32+SImm12; }
+ScoreInstruction:sw rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=4 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffc; *:4 a=rd32; ra32=ra32+SImm12; }
+ScoreInstruction:sh rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=5 & rd32 & ra32 & SImm12 { local a:4=ra32 & 0xfffffffe; local v:2=rd32:2; *:2 a=v; ra32=ra32+SImm12; }
+ScoreInstruction:lbu rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=6 & rd32 & ra32 & SImm12 { local v:1=*:1 ra32; rd32=zext(v); ra32=ra32+SImm12; }
+ScoreInstruction:sb rd32,ra32,SImm12 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=7 & rix_func3=7 & rd32 & ra32 & SImm12 { local v:1=rd32:1; *:1 ra32=v; ra32=ra32+SImm12; }
 
 # RI forms
-:addri rd32,ra32,SImm14 is p_lo=1 & p_hi=1 & major32=8 & cu=0 & rd32 & ra32 & SImm14 { rd32=ra32+SImm14; }
-:addri.c rd32,ra32,SImm14 is p_lo=1 & p_hi=1 & major32=8 & cu=1 & rd32 & ra32 & SImm14 { local result:4=ra32+SImm14; score_set_add_flags(ra32,SImm14,result); rd32=result; }
-:andri rd32,ra32,UImm14 is p_lo=1 & p_hi=1 & major32=12 & cu=0 & rd32 & ra32 & UImm14 { rd32=ra32 & UImm14; }
-:andri.c rd32,ra32,UImm14 is p_lo=1 & p_hi=1 & major32=12 & cu=1 & rd32 & ra32 & UImm14 { rd32=ra32 & UImm14; score_set_zn(rd32); }
-:orri rd32,ra32,UImm14 is p_lo=1 & p_hi=1 & major32=13 & cu=0 & rd32 & ra32 & UImm14 { rd32=ra32 | UImm14; }
-:orri.c rd32,ra32,UImm14 is p_lo=1 & p_hi=1 & major32=13 & cu=1 & rd32 & ra32 & UImm14 { rd32=ra32 | UImm14; score_set_zn(rd32); }
+ScoreInstruction:addri rd32,ra32,SImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=8 & cu=0 & rd32 & ra32 & SImm14 { rd32=ra32+SImm14; }
+ScoreInstruction:addri.c rd32,ra32,SImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=8 & cu=1 & rd32 & ra32 & SImm14 { local result:4=ra32+SImm14; score_set_add_flags(ra32,SImm14,result); rd32=result; }
+ScoreInstruction:andri rd32,ra32,UImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=12 & cu=0 & rd32 & ra32 & UImm14 { rd32=ra32 & UImm14; }
+ScoreInstruction:andri.c rd32,ra32,UImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=12 & cu=1 & rd32 & ra32 & UImm14 { rd32=ra32 & UImm14; score_set_zn(rd32); }
+ScoreInstruction:orri rd32,ra32,UImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=13 & cu=0 & rd32 & ra32 & UImm14 { rd32=ra32 | UImm14; }
+ScoreInstruction:orri.c rd32,ra32,UImm14 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=13 & cu=1 & rd32 & ra32 & UImm14 { rd32=ra32 | UImm14; score_set_zn(rd32); }
 
 # LS forms major 16..23
-:lw rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=16 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffc; rd32=*:4 a; }
-:lh rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=17 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=*:2 a; rd32=sext(v); }
-:lhu rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=18 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=*:2 a; rd32=zext(v); }
-:lb rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=19 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=*:1 a; rd32=sext(v); }
-:sw rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=20 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffc; *:4 a=rd32; }
-:sh rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=21 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=rd32:2; *:2 a=v; }
-:lbu rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=22 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=*:1 a; rd32=zext(v); }
-:sb rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=23 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=rd32:1; *:1 a=v; }
+ScoreInstruction:lw rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=16 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffc; rd32=*:4 a; }
+ScoreInstruction:lh rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=17 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=*:2 a; rd32=sext(v); }
+ScoreInstruction:lhu rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=18 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=*:2 a; rd32=zext(v); }
+ScoreInstruction:lb rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=19 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=*:1 a; rd32=sext(v); }
+ScoreInstruction:sw rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=20 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffc; *:4 a=rd32; }
+ScoreInstruction:sh rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=21 & rd32 & ra32 & SImm15 { local a:4=(ra32+SImm15)&0xfffffffe; local v:2=rd32:2; *:2 a=v; }
+ScoreInstruction:lbu rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=22 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=*:1 a; rd32=zext(v); }
+ScoreInstruction:sb rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=23 & rd32 & ra32 & SImm15 { local a:4=ra32+SImm15; local v:1=rd32:1; *:1 a=v; }
 
-:cache rd32,ra32,SImm15 is p_lo=1 & p_hi=1 & major32=24 & rd32 & ra32 & SImm15 { score_cache(); }
-:cenew is p_lo=1 & p_hi=1 & major32=28 { score_cenew(); }
+ScoreInstruction:cache rd32,ra32,SImm15 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=24 & rd32 & ra32 & SImm15 { score_cache(); }
+ScoreInstruction:cenew is packet_phase=0 & p_lo=1 & p_hi=1 & major32=28 { score_cenew(); }
 
 # ===========================================================================
 # 16-bit instructions (p16 == 0)
 # ===========================================================================
 
-:nop! is p16=0 & op16=0 & func16=0 { }
-:mlfh! rd16,HighRA is p16=0 & op16=0 & func16=1 & rd16 & HighRA { rd16 = HighRA; }
-:mhfl! HighRD,ra16 is p16=0 & op16=0 & func16=2 & HighRD & ra16 { HighRD = ra16; }
-:mv! rd16,ra16 is p16=0 & op16=0 & func16=3 & rd16 & ra16 { rd16=ra16; }
-:sll! rd16,ra16 is p16=0 & op16=0 & func16=8 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16<<sh; }
-:addc! rd16,ra16 is p16=0 & op16=0 & func16=9 & rd16 & ra16 { local c:4=(cr1>>1)&1; rd16=rd16+ra16+c; }
-:srl! rd16,ra16 is p16=0 & op16=0 & func16=10 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16>>sh; }
-:sra! rd16,ra16 is p16=0 & op16=0 & func16=11 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16 s>> sh; }
+ScoreInstruction:nop! is p16=0 & op16=0 & func16=0 { }
+ScoreInstruction:mlfh! rd16,HighRA is p16=0 & op16=0 & func16=1 & rd16 & HighRA { rd16 = HighRA; }
+ScoreInstruction:mhfl! HighRD,ra16 is p16=0 & op16=0 & func16=2 & HighRD & ra16 { HighRD = ra16; }
+ScoreInstruction:mv! rd16,ra16 is p16=0 & op16=0 & func16=3 & rd16 & ra16 { rd16=ra16; }
+ScoreInstruction:sll! rd16,ra16 is p16=0 & op16=0 & func16=8 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16<<sh; }
+ScoreInstruction:addc! rd16,ra16 is p16=0 & op16=0 & func16=9 & rd16 & ra16 { local c:4=(cr1>>1)&1; rd16=rd16+ra16+c; }
+ScoreInstruction:srl! rd16,ra16 is p16=0 & op16=0 & func16=10 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16>>sh; }
+ScoreInstruction:sra! rd16,ra16 is p16=0 & op16=0 & func16=11 & rd16 & ra16 { local sh:4=ra16&31; rd16=rd16 s>> sh; }
 
-:add! rd16,ra16 is p16=0 & op16=2 & func16=0 & rd16 & ra16 { local old:4=rd16; local result:4=old+ra16; score_set_add_flags(old,ra16,result); rd16=result; }
-:sub! rd16,ra16 is p16=0 & op16=2 & func16=1 & rd16 & ra16 { local old:4=rd16; local result:4=old-ra16; score_set_sub_flags(old,ra16,result); rd16=result; }
-:neg! rd16,ra16 is p16=0 & op16=2 & func16=2 & rd16 & ra16 { local result:4=0-ra16; score_set_sub_flags(0:4,ra16,result); rd16=result; }
-:cmp! rd16,ra16 is p16=0 & op16=2 & func16=3 & rd16 & ra16 { local result:4=rd16-ra16; score_set_sub_flags(rd16,ra16,result); }
-:and! rd16,ra16 is p16=0 & op16=2 & func16=4 & rd16 & ra16 { rd16=rd16&ra16; score_set_zn(rd16); }
-:or! rd16,ra16 is p16=0 & op16=2 & func16=5 & rd16 & ra16 { rd16=rd16|ra16; score_set_zn(rd16); }
-:not! rd16,ra16 is p16=0 & op16=2 & func16=6 & rd16 & ra16 { rd16=~ra16; score_set_zn(rd16); }
-:xor! rd16,ra16 is p16=0 & op16=2 & func16=7 & rd16 & ra16 { rd16=rd16^ra16; score_set_zn(rd16); }
-:lw! rd16,ra16 is p16=0 & op16=2 & func16=8 & rd16 & ra16 { local a:4=ra16&0xfffffffc; rd16=*:4 a; }
-:lh! rd16,ra16 is p16=0 & op16=2 & func16=9 & rd16 & ra16 { local a:4=ra16&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
-:lbu! rd16,ra16 is p16=0 & op16=2 & func16=11 & rd16 & ra16 { local v:1=*:1 ra16; rd16=zext(v); }
-:sw! rd16,ra16 is p16=0 & op16=2 & func16=12 & rd16 & ra16 { local a:4=ra16&0xfffffffc; *:4 a=rd16; }
-:sh! rd16,ra16 is p16=0 & op16=2 & func16=13 & rd16 & ra16 { local a:4=ra16&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
-:sb! rd16,ra16 is p16=0 & op16=2 & func16=15 & rd16 & ra16 { local v:1=rd16:1; *:1 ra16=v; }
+ScoreInstruction:add! rd16,ra16 is p16=0 & op16=2 & func16=0 & rd16 & ra16 { local old:4=rd16; local result:4=old+ra16; score_set_add_flags(old,ra16,result); rd16=result; }
+ScoreInstruction:sub! rd16,ra16 is p16=0 & op16=2 & func16=1 & rd16 & ra16 { local old:4=rd16; local result:4=old-ra16; score_set_sub_flags(old,ra16,result); rd16=result; }
+ScoreInstruction:neg! rd16,ra16 is p16=0 & op16=2 & func16=2 & rd16 & ra16 { local result:4=0-ra16; score_set_sub_flags(0:4,ra16,result); rd16=result; }
+ScoreInstruction:cmp! rd16,ra16 is p16=0 & op16=2 & func16=3 & rd16 & ra16 { local result:4=rd16-ra16; score_set_sub_flags(rd16,ra16,result); }
+ScoreInstruction:and! rd16,ra16 is p16=0 & op16=2 & func16=4 & rd16 & ra16 { rd16=rd16&ra16; score_set_zn(rd16); }
+ScoreInstruction:or! rd16,ra16 is p16=0 & op16=2 & func16=5 & rd16 & ra16 { rd16=rd16|ra16; score_set_zn(rd16); }
+ScoreInstruction:not! rd16,ra16 is p16=0 & op16=2 & func16=6 & rd16 & ra16 { rd16=~ra16; score_set_zn(rd16); }
+ScoreInstruction:xor! rd16,ra16 is p16=0 & op16=2 & func16=7 & rd16 & ra16 { rd16=rd16^ra16; score_set_zn(rd16); }
+ScoreInstruction:lw! rd16,ra16 is p16=0 & op16=2 & func16=8 & rd16 & ra16 { local a:4=ra16&0xfffffffc; rd16=*:4 a; }
+ScoreInstruction:lh! rd16,ra16 is p16=0 & op16=2 & func16=9 & rd16 & ra16 { local a:4=ra16&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
+ScoreInstruction:lbu! rd16,ra16 is p16=0 & op16=2 & func16=11 & rd16 & ra16 { local v:1=*:1 ra16; rd16=zext(v); }
+ScoreInstruction:sw! rd16,ra16 is p16=0 & op16=2 & func16=12 & rd16 & ra16 { local a:4=ra16&0xfffffffc; *:4 a=rd16; }
+ScoreInstruction:sh! rd16,ra16 is p16=0 & op16=2 & func16=13 & rd16 & ra16 { local a:4=ra16&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
+ScoreInstruction:sb! rd16,ra16 is p16=0 & op16=2 & func16=15 & rd16 & ra16 { local v:1=rd16:1; *:1 ra16=v; }
 
-:pop! PReg,preg_base is p16=0 & op16=2 & func16=10 & PReg & preg_base { local a:4=preg_base&0xfffffffc; PReg=*:4 a; preg_base=preg_base+4; }
-:push! PReg,preg_base is p16=0 & op16=2 & func16=14 & PReg & preg_base { preg_base=preg_base-4; local a:4=preg_base&0xfffffffc; *:4 a=PReg; }
+ScoreInstruction:pop! PReg,preg_base is p16=0 & op16=2 & func16=10 & PReg & preg_base { local a:4=preg_base&0xfffffffc; PReg=*:4 a; preg_base=preg_base+4; }
+ScoreInstruction:push! PReg,preg_base is p16=0 & op16=2 & func16=14 & PReg & preg_base { preg_base=preg_base-4; local a:4=preg_base&0xfffffffc; *:4 a=PReg; }
 
-:j! JTarget16 is p16=0 & op16=3 & lk16=0 & JTarget16 { goto JTarget16; }
-:jl! JTarget16 is p16=0 & op16=3 & lk16=1 & JTarget16 { r3=inst_next; call JTarget16; }
+ScoreInstruction:j! JTarget16 is p16=0 & op16=3 & lk16=0 & JTarget16 { goto JTarget16; }
+ScoreInstruction:jl! JTarget16 is p16=0 & op16=3 & lk16=1 & JTarget16 { r3=inst_next; call JTarget16; }
 
-:ldiu! rd16,imm8 is p16=0 & op16=5 & rd16 & imm8 { rd16=imm8; }
+ScoreInstruction:ldiu! rd16,imm8 is p16=0 & op16=5 & rd16 & imm8 { rd16=imm8; }
 
-:addei! rd16,imm4 is p16=0 & op16=6 & i16_func3=0 & imm_sign=0 & rd16 & imm4 { local delta:4=1 << imm4; rd16=rd16+delta; score_set_zn(rd16); }
-:subei! rd16,imm4 is p16=0 & op16=6 & i16_func3=0 & imm_sign=1 & rd16 & imm4 { local delta:4=1 << imm4; rd16=rd16-delta; score_set_zn(rd16); }
-:slli! rd16,imm5 is p16=0 & op16=6 & i16_func3=1 & rd16 & imm5 { rd16=rd16 << imm5; score_set_zn(rd16); }
-:sdbbp! rd16 is p16=0 & op16=6 & i16_func3=2 & rd16 { score_debug_break(); }
-:srli! rd16,imm5 is p16=0 & op16=6 & i16_func3=3 & rd16 & imm5 { rd16=rd16 >> imm5; score_set_zn(rd16); }
-:bitclr! rd16,imm5 is p16=0 & op16=6 & i16_func3=4 & rd16 & imm5 { rd16=rd16 & ~(1 << imm5); score_set_zn(rd16); }
-:bitset! rd16,imm5 is p16=0 & op16=6 & i16_func3=5 & rd16 & imm5 { rd16=rd16 | (1 << imm5); score_set_zn(rd16); }
-:bittst! rd16,imm5 is p16=0 & op16=6 & i16_func3=6 & rd16 & imm5 { local v:4=rd16 & (1 << imm5); score_set_zn(v); }
-:bittgl! rd16,imm5 is p16=0 & op16=6 & i16_func3=7 & rd16 & imm5 { rd16=rd16 ^ (1 << imm5); score_set_zn(rd16); }
+ScoreInstruction:addei! rd16,imm4 is p16=0 & op16=6 & i16_func3=0 & imm_sign=0 & rd16 & imm4 { local delta:4=1 << imm4; rd16=rd16+delta; score_set_zn(rd16); }
+ScoreInstruction:subei! rd16,imm4 is p16=0 & op16=6 & i16_func3=0 & imm_sign=1 & rd16 & imm4 { local delta:4=1 << imm4; rd16=rd16-delta; score_set_zn(rd16); }
+ScoreInstruction:slli! rd16,imm5 is p16=0 & op16=6 & i16_func3=1 & rd16 & imm5 { rd16=rd16 << imm5; score_set_zn(rd16); }
+ScoreInstruction:sdbbp! rd16 is p16=0 & op16=6 & i16_func3=2 & rd16 { score_debug_break(); }
+ScoreInstruction:srli! rd16,imm5 is p16=0 & op16=6 & i16_func3=3 & rd16 & imm5 { rd16=rd16 >> imm5; score_set_zn(rd16); }
+ScoreInstruction:bitclr! rd16,imm5 is p16=0 & op16=6 & i16_func3=4 & rd16 & imm5 { rd16=rd16 & ~(1 << imm5); score_set_zn(rd16); }
+ScoreInstruction:bitset! rd16,imm5 is p16=0 & op16=6 & i16_func3=5 & rd16 & imm5 { rd16=rd16 | (1 << imm5); score_set_zn(rd16); }
+ScoreInstruction:bittst! rd16,imm5 is p16=0 & op16=6 & i16_func3=6 & rd16 & imm5 { local v:4=rd16 & (1 << imm5); score_set_zn(v); }
+ScoreInstruction:bittgl! rd16,imm5 is p16=0 & op16=6 & i16_func3=7 & rd16 & imm5 { rd16=rd16 ^ (1 << imm5); score_set_zn(rd16); }
 
-:lwp! rd16,imm5 is p16=0 & op16=7 & i16_func3=0 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; rd16=*:4 a; }
-:lhp! rd16,imm5 is p16=0 & op16=7 & i16_func3=1 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
-:lbup! rd16,imm5 is p16=0 & op16=7 & i16_func3=3 & rd16 & imm5 { local a:4=r2+imm5; local v:1=*:1 a; rd16=zext(v); }
-:swp! rd16,imm5 is p16=0 & op16=7 & i16_func3=4 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; *:4 a=rd16; }
-:shp! rd16,imm5 is p16=0 & op16=7 & i16_func3=5 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
-:sbp! rd16,imm5 is p16=0 & op16=7 & i16_func3=7 & rd16 & imm5 { local a:4=r2+imm5; local v:1=rd16:1; *:1 a=v; }
+ScoreInstruction:lwp! rd16,imm5 is p16=0 & op16=7 & i16_func3=0 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; rd16=*:4 a; }
+ScoreInstruction:lhp! rd16,imm5 is p16=0 & op16=7 & i16_func3=1 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=*:2 a; rd16=sext(v); }
+ScoreInstruction:lbup! rd16,imm5 is p16=0 & op16=7 & i16_func3=3 & rd16 & imm5 { local a:4=r2+imm5; local v:1=*:1 a; rd16=zext(v); }
+ScoreInstruction:swp! rd16,imm5 is p16=0 & op16=7 & i16_func3=4 & rd16 & imm5 { local a:4=(r2+(imm5<<2))&0xfffffffc; *:4 a=rd16; }
+ScoreInstruction:shp! rd16,imm5 is p16=0 & op16=7 & i16_func3=5 & rd16 & imm5 { local a:4=(r2+(imm5<<1))&0xfffffffe; local v:2=rd16:2; *:2 a=v; }
+ScoreInstruction:sbp! rd16,imm5 is p16=0 & op16=7 & i16_func3=7 & rd16 & imm5 { local a:4=r2+imm5; local v:1=rd16:1; *:1 a=v; }
 
-:bcs BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=0 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bcsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=1 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bcs! BTarget16 is p16=0 & op16=4 & cond16=0 & BTarget16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brcs ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brcsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brcs! ra16 is p16=0 & op16=0 & func16=4 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brcsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bcs BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=0 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bcsl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=0 & cu=1 & BTarget32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bcs! BTarget16 is p16=0 & op16=4 & cond16=0 & BTarget16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brcs ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brcsl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=0 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brcs! ra16 is p16=0 & op16=0 & func16=4 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brcsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=0 & ra16 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bcc BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bccl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bcc! BTarget16 is p16=0 & op16=4 & cond16=1 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brcc ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brccl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brcc! ra16 is p16=0 & op16=0 & func16=4 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brccl! ra16 is p16=0 & op16=0 & func16=12 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bcc BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bccl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=1 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bcc! BTarget16 is p16=0 & op16=4 & cond16=1 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brcc ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brccl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=1 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brcc! ra16 is p16=0 & op16=0 & func16=4 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brccl! ra16 is p16=0 & op16=0 & func16=12 & rd16=1 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bgtu BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget32; <done> }
-:bgtul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call BTarget32; <done> }
-:bgtu! BTarget16 is p16=0 & op16=4 & cond16=2 & BTarget16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget16; <done> }
-:brgtu ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra32]; <done> }
-:brgtul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra32]; <done> }
-:brgtu! ra16 is p16=0 & op16=0 & func16=4 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra16]; <done> }
-:brgtul! ra16 is p16=0 & op16=0 & func16=12 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bgtu BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget32; <done> }
+ScoreInstruction:bgtul BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=2 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bgtu! BTarget16 is p16=0 & op16=4 & cond16=2 & BTarget16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto BTarget16; <done> }
+ScoreInstruction:brgtu ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra32]; <done> }
+ScoreInstruction:brgtul ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=2 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brgtu! ra16 is p16=0 & op16=0 & func16=4 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; goto [ra16]; <done> }
+ScoreInstruction:brgtul! ra16 is p16=0 & op16=0 & func16=12 & rd16=2 & ra16 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; r3=inst_next; call [ra16]; <done> }
 
-:bleu BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bleul BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bleu! BTarget16 is p16=0 & op16=4 & cond16=3 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brleu ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brleul ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brleu! ra16 is p16=0 & op16=0 & func16=4 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brleul! ra16 is p16=0 & op16=0 & func16=12 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bleu BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=0 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bleul BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=3 & cu=1 & BTarget32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bleu! BTarget16 is p16=0 & op16=4 & cond16=3 & BTarget16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brleu ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brleul ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=3 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brleu! ra16 is p16=0 & op16=0 & func16=4 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brleul! ra16 is p16=0 & op16=0 & func16=12 & rd16=3 & ra16 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:beq BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:beql BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:beq! BTarget16 is p16=0 & op16=4 & cond16=4 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:breq ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:breql ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:breq! ra16 is p16=0 & op16=0 & func16=4 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:breql! ra16 is p16=0 & op16=0 & func16=12 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:beq BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:beql BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=4 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:beq! BTarget16 is p16=0 & op16=4 & cond16=4 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:breq ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:breql ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=4 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:breq! ra16 is p16=0 & op16=0 & func16=4 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:breql! ra16 is p16=0 & op16=0 & func16=12 & rd16=4 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bne BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=0 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bnel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=1 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bne! BTarget16 is p16=0 & op16=4 & cond16=5 & BTarget16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brne ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brnel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brne! ra16 is p16=0 & op16=0 & func16=4 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brnel! ra16 is p16=0 & op16=0 & func16=12 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bne BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=0 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bnel BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=5 & cu=1 & BTarget32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bne! BTarget16 is p16=0 & op16=4 & cond16=5 & BTarget16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brne ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brnel ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=5 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brne! ra16 is p16=0 & op16=0 & func16=4 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brnel! ra16 is p16=0 & op16=0 & func16=12 & rd16=5 & ra16 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bgt BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget32; <done> }
-:bgtl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call BTarget32; <done> }
-:bgt! BTarget16 is p16=0 & op16=4 & cond16=6 & BTarget16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget16; <done> }
-:brgt ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra32]; <done> }
-:brgtl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra32]; <done> }
-:brgt! ra16 is p16=0 & op16=0 & func16=4 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra16]; <done> }
-:brgtl! ra16 is p16=0 & op16=0 & func16=12 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bgt BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget32; <done> }
+ScoreInstruction:bgtl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=6 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bgt! BTarget16 is p16=0 & op16=4 & cond16=6 & BTarget16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto BTarget16; <done> }
+ScoreInstruction:brgt ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra32]; <done> }
+ScoreInstruction:brgtl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=6 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brgt! ra16 is p16=0 & op16=0 & func16=4 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; goto [ra16]; <done> }
+ScoreInstruction:brgtl! ra16 is p16=0 & op16=0 & func16=12 & rd16=6 & ra16 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; r3=inst_next; call [ra16]; <done> }
 
-:ble BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:blel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:ble! BTarget16 is p16=0 & op16=4 & cond16=7 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brle ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brlel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brle! ra16 is p16=0 & op16=0 & func16=4 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brlel! ra16 is p16=0 & op16=0 & func16=12 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:ble BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=0 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:blel BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=7 & cu=1 & BTarget32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:ble! BTarget16 is p16=0 & op16=4 & cond16=7 & BTarget16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brle ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brlel ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=7 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brle! ra16 is p16=0 & op16=0 & func16=4 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brlel! ra16 is p16=0 & op16=0 & func16=12 & rd16=7 & ra16 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bge BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=0 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bgel BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=1 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bge! BTarget16 is p16=0 & op16=4 & cond16=8 & BTarget16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brge ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brgel ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brge! ra16 is p16=0 & op16=0 & func16=4 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brgel! ra16 is p16=0 & op16=0 & func16=12 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bge BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=0 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bgel BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=8 & cu=1 & BTarget32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bge! BTarget16 is p16=0 & op16=4 & cond16=8 & BTarget16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brge ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brgel ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=8 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brge! ra16 is p16=0 & op16=0 & func16=4 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brgel! ra16 is p16=0 & op16=0 & func16=12 & rd16=8 & ra16 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:blt BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=0 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bltl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=1 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:blt! BTarget16 is p16=0 & op16=4 & cond16=9 & BTarget16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brlt ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brltl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brlt! ra16 is p16=0 & op16=0 & func16=4 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brltl! ra16 is p16=0 & op16=0 & func16=12 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:blt BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=0 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bltl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=9 & cu=1 & BTarget32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:blt! BTarget16 is p16=0 & op16=4 & cond16=9 & BTarget16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brlt ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brltl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=9 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brlt! ra16 is p16=0 & op16=0 & func16=4 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brltl! ra16 is p16=0 & op16=0 & func16=12 & rd16=9 & ra16 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bmi BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=0 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bmil BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=1 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bmi! BTarget16 is p16=0 & op16=4 & cond16=10 & BTarget16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brmi ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brmil ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brmi! ra16 is p16=0 & op16=0 & func16=4 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brmil! ra16 is p16=0 & op16=0 & func16=12 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bmi BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=0 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bmil BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=10 & cu=1 & BTarget32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bmi! BTarget16 is p16=0 & op16=4 & cond16=10 & BTarget16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brmi ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brmil ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=10 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brmi! ra16 is p16=0 & op16=0 & func16=4 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brmil! ra16 is p16=0 & op16=0 & func16=12 & rd16=10 & ra16 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bpl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=0 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bpll BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=1 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bpl! BTarget16 is p16=0 & op16=4 & cond16=11 & BTarget16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brpl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brpll ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brpl! ra16 is p16=0 & op16=0 & func16=4 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brpll! ra16 is p16=0 & op16=0 & func16=12 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bpl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=0 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bpll BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=11 & cu=1 & BTarget32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bpl! BTarget16 is p16=0 & op16=4 & cond16=11 & BTarget16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brpl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brpll ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=11 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brpl! ra16 is p16=0 & op16=0 & func16=4 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brpll! ra16 is p16=0 & op16=0 & func16=12 & rd16=11 & ra16 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bvs BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=0 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bvsl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=1 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bvs! BTarget16 is p16=0 & op16=4 & cond16=12 & BTarget16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brvs ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brvsl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brvs! ra16 is p16=0 & op16=0 & func16=4 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brvsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bvs BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=0 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bvsl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=12 & cu=1 & BTarget32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bvs! BTarget16 is p16=0 & op16=4 & cond16=12 & BTarget16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brvs ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brvsl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=12 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brvs! ra16 is p16=0 & op16=0 & func16=4 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brvsl! ra16 is p16=0 & op16=0 & func16=12 & rd16=12 & ra16 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bvc BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=0 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
-:bvcl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=1 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
-:bvc! BTarget16 is p16=0 & op16=4 & cond16=13 & BTarget16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
-:brvc ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
-:brvcl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
-:brvc! ra16 is p16=0 & op16=0 & func16=4 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
-:brvcl! ra16 is p16=0 & op16=0 & func16=12 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bvc BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=0 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget32; <done> }
+ScoreInstruction:bvcl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=13 & cu=1 & BTarget32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bvc! BTarget16 is p16=0 & op16=4 & cond16=13 & BTarget16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto BTarget16; <done> }
+ScoreInstruction:brvc ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra32]; <done> }
+ScoreInstruction:brvcl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=13 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brvc! ra16 is p16=0 & op16=0 & func16=4 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> goto [ra16]; <done> }
+ScoreInstruction:brvcl! ra16 is p16=0 & op16=0 & func16=12 & rd16=13 & ra16 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> r3=inst_next; call [ra16]; <done> }
 
-:bcnz BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=0 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget32; <done> }
-:bcnzl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=1 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call BTarget32; <done> }
-:bcnz! BTarget16 is p16=0 & op16=4 & cond16=14 & BTarget16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget16; <done> }
-:brcnz ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra32]; <done> }
-:brcnzl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra32]; <done> }
-:brcnz! ra16 is p16=0 & op16=0 & func16=4 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra16]; <done> }
-:brcnzl! ra16 is p16=0 & op16=0 & func16=12 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra16]; <done> }
+ScoreInstruction:bcnz BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=0 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget32; <done> }
+ScoreInstruction:bcnzl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=14 & cu=1 & BTarget32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call BTarget32; <done> }
+ScoreInstruction:bcnz! BTarget16 is p16=0 & op16=4 & cond16=14 & BTarget16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto BTarget16; <done> }
+ScoreInstruction:brcnz ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra32]; <done> }
+ScoreInstruction:brcnzl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=14 & ra32 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra32]; <done> }
+ScoreInstruction:brcnz! ra16 is p16=0 & op16=0 & func16=4 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; goto [ra16]; <done> }
+ScoreInstruction:brcnzl! ra16 is p16=0 & op16=0 & func16=12 & rd16=14 & ra16 { if (sr0 == 0) goto <done>; sr0=sr0-1; r3=inst_next; call [ra16]; <done> }
 
-:b BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=0 & BTarget32 { goto BTarget32; }
-:bl BTarget32 is p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=1 & BTarget32 { r3=inst_next; call BTarget32; }
-:b! BTarget16 is p16=0 & op16=4 & cond16=15 & BTarget16 { goto BTarget16; }
-:br ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=15 & ra32 { goto [ra32]; }
-:brl ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=15 & ra32 { r3=inst_next; call [ra32]; }
-:br! ra16 is p16=0 & op16=0 & func16=4 & rd16=15 & ra16 { goto [ra16]; }
-:brl! ra16 is p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { r3=inst_next; call [ra16]; }
+ScoreInstruction:b BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=0 & BTarget32 { goto BTarget32; }
+ScoreInstruction:bl BTarget32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=4 & bc_cond=15 & cu=1 & BTarget32 { r3=inst_next; call BTarget32; }
+ScoreInstruction:b! BTarget16 is p16=0 & op16=4 & cond16=15 & BTarget16 { goto BTarget16; }
+ScoreInstruction:br ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=0 & rb32=15 & ra32 { goto [ra32]; }
+ScoreInstruction:brl ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=4 & cu=1 & rb32=15 & ra32 { r3=inst_next; call [ra32]; }
+ScoreInstruction:br! ra16 is p16=0 & op16=0 & func16=4 & rd16=15 & ra16 { goto [ra16]; }
+ScoreInstruction:brl! ra16 is p16=0 & op16=0 & func16=12 & rd16=15 & ra16 { r3=inst_next; call [ra16]; }
 
-:tcs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvcs rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=0 & rd32 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tcs! is p16=0 & op16=0 & func16=5 & rd16=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tcs is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvcs rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=0 & rd32 & ra32 { if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tcs! is p16=0 & op16=0 & func16=5 & rd16=0 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tcc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvcc rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=1 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tcc! is p16=0 & op16=0 & func16=5 & rd16=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tcc is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvcc rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=1 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tcc! is p16=0 & op16=0 & func16=5 & rd16=1 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tgtu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
-:mvgtu rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=2 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; rd32=ra32; <done> }
-:tgtu! is p16=0 & op16=0 & func16=5 & rd16=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tgtu is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvgtu rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=2 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; rd32=ra32; <done> }
+ScoreInstruction:tgtu! is p16=0 & op16=0 & func16=5 & rd16=2 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <done>; if ((cr1 & 0x4) != 0) goto <done>; cr1 = cr1 | 0x10; <done> }
 
-:tleu is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvleu rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=3 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tleu! is p16=0 & op16=0 & func16=5 & rd16=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tleu is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvleu rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=3 & rd32 & ra32 { if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tleu! is p16=0 & op16=0 & func16=5 & rd16=3 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x2) == 0) goto <take>; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:teq is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mveq rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=4 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:teq! is p16=0 & op16=0 & func16=5 & rd16=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:teq is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mveq rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=4 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:teq! is p16=0 & op16=0 & func16=5 & rd16=4 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tne is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvne rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=5 & rd32 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tne! is p16=0 & op16=0 & func16=5 & rd16=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tne is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvne rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=5 & rd32 & ra32 { if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tne! is p16=0 & op16=0 & func16=5 & rd16=5 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tgt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
-:mvgt rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=6 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; rd32=ra32; <done> }
-:tgt! is p16=0 & op16=0 & func16=5 & rd16=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tgt is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvgt rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=6 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; rd32=ra32; <done> }
+ScoreInstruction:tgt! is p16=0 & op16=0 & func16=5 & rd16=6 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <done>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <done>; cr1 = cr1 | 0x10; <done> }
 
-:tle is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvle rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=7 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tle! is p16=0 & op16=0 & func16=5 & rd16=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tle is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvle rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=7 & rd32 & ra32 { if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tle! is p16=0 & op16=0 & func16=5 & rd16=7 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x4) != 0) goto <take>; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tge is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvge rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=8 & rd32 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tge! is p16=0 & op16=0 & func16=5 & rd16=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tge is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvge rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=8 & rd32 & ra32 { if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tge! is p16=0 & op16=0 & func16=5 & rd16=8 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tlt is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvlt rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=9 & rd32 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tlt! is p16=0 & op16=0 & func16=5 & rd16=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tlt is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvlt rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=9 & rd32 & ra32 { if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tlt! is p16=0 & op16=0 & func16=5 & rd16=9 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != ((cr1 & 0x1) << 3)) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tmi is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvmi rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=10 & rd32 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tmi! is p16=0 & op16=0 & func16=5 & rd16=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tmi is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvmi rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=10 & rd32 & ra32 { if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tmi! is p16=0 & op16=0 & func16=5 & rd16=10 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tpl is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvpl rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=11 & rd32 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tpl! is p16=0 & op16=0 & func16=5 & rd16=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tpl is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvpl rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=11 & rd32 & ra32 { if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tpl! is p16=0 & op16=0 & func16=5 & rd16=11 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x8) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tvs is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvvs rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=12 & rd32 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tvs! is p16=0 & op16=0 & func16=5 & rd16=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tvs is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvvs rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=12 & rd32 & ra32 { if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tvs! is p16=0 & op16=0 & func16=5 & rd16=12 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) != 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tvc is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
-:mvvc rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=13 & rd32 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
-:tvc! is p16=0 & op16=0 & func16=5 & rd16=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tvc is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:mvvc rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=13 & rd32 & ra32 { if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> rd32=ra32; <done> }
+ScoreInstruction:tvc! is p16=0 & op16=0 & func16=5 & rd16=13 { cr1 = cr1 & 0xffffffef; if ((cr1 & 0x1) == 0) goto <take>; goto <done>; <take> cr1 = cr1 | 0x10; <done> }
 
-:tcnz is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
-:tcnz! is p16=0 & op16=0 & func16=5 & rd16=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tcnz is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
+ScoreInstruction:tcnz! is p16=0 & op16=0 & func16=5 & rd16=14 { cr1 = cr1 & 0xffffffef; if (sr0 != 0) goto <yes>; goto <done>; <yes> cr1 = cr1 | 0x10; <done> }
 
-:t is p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=15 { cr1 = cr1 | 0x10; }
-:mv rd32,ra32 is p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=15 & rd32 & ra32 { rd32=ra32; }
-:t! is p16=0 & op16=0 & func16=5 & rd16=15 { cr1 = cr1 | 0x10; }
+ScoreInstruction:t is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=15 { cr1 = cr1 | 0x10; }
+ScoreInstruction:mv rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=15 & rd32 & ra32 { rd32=ra32; }
+ScoreInstruction:t! is p16=0 & op16=0 & func16=5 & rd16=15 { cr1 = cr1 | 0x10; }
