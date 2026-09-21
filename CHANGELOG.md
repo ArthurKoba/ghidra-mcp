@@ -23,6 +23,13 @@ Complete version history for the Ghidra MCP Server project.
 - Added regression guards for all packet-wide constructors while retaining the
   existing instruction table and execution semantics.
 
+### SCORE7 return-flow fix
+
+- Model GCC ABI returns through `br r3` and `br! r3` as SLEIGH `return`
+  operations instead of generic indirect jumps, so Ghidra can terminate
+  functions and build correct decompiler control flow.
+- Keep the generic `br` / `br!` constructors for non-return indirect branches.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

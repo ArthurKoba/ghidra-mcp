@@ -80,7 +80,7 @@ public class Score7SleighCompileTest {
             .filter(line -> line.startsWith(":") && !line.startsWith(":^instruction"))
             .toList();
 
-        assertEquals("unexpected SCORE7 root-constructor count", 325, rootConstructors.size());
+        assertEquals("unexpected SCORE7 root-constructor count", 327, rootConstructors.size());
         assertTrue(
             "every real instruction constructor must be below the decode wrapper",
             rootConstructors.stream().allMatch(line -> line.contains("decode_phase=1"))
@@ -91,7 +91,7 @@ public class Score7SleighCompileTest {
             .toList();
         assertEquals(
             "unexpected SCORE7 packet-wide constructor count",
-            219,
+            220,
             packetWideConstructors.size()
         );
         assertTrue(
@@ -108,6 +108,43 @@ public class Score7SleighCompileTest {
             "root wrapper must derive PC bit 1 before recursive decode",
             lines.stream().anyMatch(line ->
                 line.contains("packet_half = (inst_start >> 1) $and 1")
+            )
+        );
+    }
+
+    @Test
+    public void score7AbiReturnsUseReturnPcode() throws Exception {
+        Path source = Path.of(
+            "ghidra_processors",
+            "SCORE7",
+            "data",
+            "languages",
+            "SCORE7.slaspec"
+        ).toAbsolutePath();
+
+        List<String> lines = Files.readAllLines(source);
+        assertTrue(
+            "32-bit br r3 must be modeled as an ABI return",
+            lines.stream().anyMatch(line ->
+                line.startsWith(":br r3 is ") && line.contains("{ return [r3]; }")
+            )
+        );
+        assertTrue(
+            "16-bit br! r3 must be modeled as an ABI return",
+            lines.stream().anyMatch(line ->
+                line.startsWith(":br! r3 is ") && line.contains("{ return [r3]; }")
+            )
+        );
+        assertTrue(
+            "generic indirect br must remain available for non-r3 targets",
+            lines.stream().anyMatch(line ->
+                line.startsWith(":br ra32 is ") && line.contains("{ goto [ra32]; }")
+            )
+        );
+        assertTrue(
+            "generic compact indirect br! must remain available for non-r3 targets",
+            lines.stream().anyMatch(line ->
+                line.startsWith(":br! ra16 is ") && line.contains("{ goto [ra16]; }")
             )
         );
     }
