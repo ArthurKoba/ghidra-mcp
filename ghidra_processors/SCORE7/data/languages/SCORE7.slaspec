@@ -283,10 +283,6 @@ ScorePhase: is epsilon
     [ packet_phase = (inst_start >> 1) $and 1; ]
     { }
 
-:^ScoreInstruction is ScorePhase & ScoreInstruction {
-    build ScoreInstruction;
-}
-
 # ----- parity / parallel encoding guards -----
 
 ScoreInstruction:parity_error is packet_phase=0 & p_lo=1 & p_hi=0 {
@@ -756,3 +752,10 @@ ScoreInstruction:tcnz! is p16=0 & op16=0 & func16=5 & rd16=14 { cr1 = cr1 & 0xff
 ScoreInstruction:t is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=42 & rb32=15 { cr1 = cr1 | 0x10; }
 ScoreInstruction:mv rd32,ra32 is packet_phase=0 & p_lo=1 & p_hi=1 & major32=0 & func6=43 & rb32=15 & rd32 & ra32 { rd32=ra32; }
 ScoreInstruction:t! is p16=0 & op16=0 & func16=5 & rd16=15 { cr1 = cr1 | 0x10; }
+
+# Root instruction wrapper is declared after ScoreInstruction so the subtable
+# symbol is defined before it is referenced.
+:^ScoreInstruction is ScorePhase & ScoreInstruction {
+    build ScoreInstruction;
+}
+
