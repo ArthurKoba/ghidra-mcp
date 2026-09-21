@@ -144,16 +144,16 @@ UImm16: val is imm16_lo & imm16_hi
     [ val = (imm16_hi << 14) | imm16_lo; ]
     { export *[const]:4 val; }
 
-SImm14: val is ri_imm14_s
+SImm14: ri_imm14_s is ri_imm14_s
     { export *[const]:4 ri_imm14_s; }
 
-UImm14: val is ri_imm14
+UImm14: ri_imm14 is ri_imm14
     { export *[const]:4 ri_imm14; }
 
-SImm12: val is rix_imm12
+SImm12: rix_imm12 is rix_imm12
     { export *[const]:4 rix_imm12; }
 
-SImm15: val is ls_imm15
+SImm15: ls_imm15 is ls_imm15
     { export *[const]:4 ls_imm15; }
 
 JTarget32: addr is jdisp_lo & jdisp_hi
