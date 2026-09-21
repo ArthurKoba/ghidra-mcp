@@ -34,10 +34,10 @@ define register offset=0x200 size=4 [ sr0 sr1 sr2 ];
 define register offset=0x210 size=4 [ ceh cel ];
 define register offset=0x300 size=4 pc;
 
-// SCORE7 long instructions and PCE packets may only begin at 4-byte packet
-// boundaries.  Ghidra's instruction alignment is 2 bytes because ordinary
-// compact instructions can start at +2, so derive the packet phase from the
-// actual instruction address before matching the instruction subtable.
+# SCORE7 long instructions and PCE packets may only begin at 4-byte packet
+# boundaries.  Ghidra's instruction alignment is 2 bytes because ordinary
+# compact instructions can start at +2, so derive the packet phase from the
+# actual instruction address before matching the instruction subtable.
 define register offset=0x304 size=4 score_context;
 define context score_context
     packet_phase=(0,0) noflow
