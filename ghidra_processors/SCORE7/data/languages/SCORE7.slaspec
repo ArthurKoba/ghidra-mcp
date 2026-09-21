@@ -388,7 +388,9 @@ macro score_set_t(value) {
 }
 :mulu ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=33 & ra32 & rb32 {
     local a:8=zext(ra32); local b:8=zext(rb32); local product:8=a*b;
-    cel=product; ceh=product >> 32;
+    cel=product:4;
+    local upper:8=product >> 32;
+    ceh=upper:4;
 }
 :div ra32,rb32 is p_lo=1 & p_hi=1 & major32=0 & func6=34 & ra32 & rb32 {
     if (rb32 == 0) goto <bad>; cel=ra32 s/ rb32; ceh=ra32 s% rb32; goto <done>;
