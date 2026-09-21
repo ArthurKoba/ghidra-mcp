@@ -2,48 +2,6 @@
 # Multi-stage build for minimal runtime image
 
 # =============================================================================
-# Stage 0: SCORE7 binutils - build the legacy Sunplus S+CORE disassembler
-# =============================================================================
-FROM eclipse-temurin:21-jdk AS score-binutils-builder
-
-ARG BINUTILS_VERSION=2.46.1
-
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    bison \
-    flex \
-    texinfo \
-    wget \
-    xz-utils \
-    zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /tmp
-RUN wget -q \
-    "https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_VERSION}.tar.xz" \
-    -O binutils.tar.xz \
-    && tar -xf binutils.tar.xz \
-    && mkdir binutils-build
-
-WORKDIR /tmp/binutils-build
-RUN ../binutils-${BINUTILS_VERSION}/configure \
-    --target=score-elf \
-    --prefix=/opt/score-binutils \
-    --disable-nls \
-    --disable-werror \
-    --disable-gdb \
-    --disable-gas \
-    --disable-ld \
-    --disable-gprofng \
-    --disable-sim \
-    --disable-shared \
-    --without-zstd \
-    && make -j"$(nproc)" all-binutils \
-    && make install-binutils \
-    && /opt/score-binutils/bin/score-elf-objdump --version \
-    && /opt/score-binutils/bin/score-elf-objdump -i | grep -qi score
-
-# =============================================================================
 # Stage 1: Builder - Download Ghidra and build the plugin
 # =============================================================================
 FROM eclipse-temurin:21-jdk AS builder
@@ -138,10 +96,12 @@ RUN apt-get update && apt-get install -y \
 # Copy Ghidra from builder
 COPY --from=builder /opt/ghidra /opt/ghidra
 
-# SCORE7 is no longer enabled in the distro objdump shipped by Ubuntu, but
-# GNU binutils still carries the official Sunplus S+CORE backend. Keep a
-# dedicated cross-objdump in the image for Ghidra scripts and ISA validation.
-COPY --from=score-binutils-builder /opt/score-binutils/bin/score-elf-objdump /usr/local/bin/score-elf-objdump
+# Install the native Sunplus S+CORE 7 processor definition and compile its
+# SLEIGH source with the exact Ghidra version shipped by this image.
+COPY ghidra_processors/SCORE7 /opt/ghidra/Ghidra/Processors/SCORE7
+RUN /opt/ghidra/support/sleigh /opt/ghidra/Ghidra/Processors/SCORE7/data/languages/SCORE7.slaspec \
+    && test -s /opt/ghidra/Ghidra/Processors/SCORE7/data/languages/SCORE7.sla
+
 
 # Install the Jython extension shipped in the Ghidra 12.1 distribution:
 # starting with 12.1 it is no longer enabled by default and must be
