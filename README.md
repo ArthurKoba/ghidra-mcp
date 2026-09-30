@@ -974,6 +974,7 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `project_session_info` - Inspect worker/session state for one project_id
 - `release_project_session` - Release an idle project worker session
 - `search_tools` - Search the full tool catalog by keyword
+- `set_worker_enabled` - Enable or disable a worker slot for new project routing
 - `unload_tool_group` - Unregister a tool group's dynamic tools
 
 <!-- END GENERATED API REFERENCE -->

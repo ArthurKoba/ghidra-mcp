@@ -12,6 +12,7 @@ from . import project_sessions
 from . import registry
 from . import state
 from . import transport
+from . import worker_control
 from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
 from .server import Context, mcp
 from .validation import validate_server_url
@@ -125,7 +126,7 @@ async def set_worker_enabled(
 
     try:
         result = await state.run_in_worker(
-            project_sessions.set_worker_enabled,
+            worker_control.set_worker_enabled,
             worker_index,
             enabled,
             close_project,

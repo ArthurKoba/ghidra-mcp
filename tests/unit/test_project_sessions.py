@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from bridge_mcp_ghidra import project_sessions
+from bridge_mcp_ghidra import worker_control
 
 
 PROJECTS = [
@@ -271,7 +272,7 @@ async def test_manual_release_refuses_queued_project(fake_workers):
 def test_disabled_worker_is_removed_from_project_routing(fake_workers):
     ids = _ids()
 
-    state = project_sessions.set_worker_enabled(0, False)
+    state = worker_control.set_worker_enabled(0, False)
     assert state["enabled"] is False
 
     beta = project_sessions.checkout(ids["beta"])
@@ -291,7 +292,7 @@ def test_disabling_idle_worker_closes_its_project(fake_workers):
     project_sessions.release_lease(lease)
     assert fake_workers["http://127.0.0.1:8089"] == "alpha"
 
-    state = project_sessions.set_worker_enabled(0, False)
+    state = worker_control.set_worker_enabled(0, False)
 
     assert state["enabled"] is False
     assert state["project_id"] is None
@@ -304,9 +305,9 @@ async def test_disabling_busy_worker_is_rejected(fake_workers):
     lease = await project_sessions.acquire_project_operation(ids["alpha"], "busy-op")
     try:
         with pytest.raises(project_sessions.ProjectBusyError, match="Worker 0 is busy"):
-            project_sessions.set_worker_enabled(0, False)
+            worker_control.set_worker_enabled(0, False)
     finally:
         await project_sessions.release_project_operation(lease)
 
-    state = project_sessions.set_worker_enabled(0, True)
+    state = worker_control.set_worker_enabled(0, True)
     assert state["enabled"] is True
