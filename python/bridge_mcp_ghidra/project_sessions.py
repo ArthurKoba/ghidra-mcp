@@ -499,6 +499,15 @@ def _mark_queued(worker_url: str) -> None:
         _touch(slot)
 
 
+def _mark_cancelled(worker_url: str) -> None:
+    with _lock:
+        slot = _slots.get(worker_url)
+        if slot is None:
+            return
+        slot.queued = max(0, slot.queued - 1)
+        _touch(slot)
+
+
 def _mark_running(worker_url: str, operation: str) -> None:
     with _lock:
         slot = _slots.get(worker_url)
@@ -529,7 +538,7 @@ async def acquire_project_operation(project_id: str, operation: str) -> ProjectL
     try:
         await lock.acquire()
     except BaseException:
-        await state.run_in_worker(_mark_finished, lease.worker_url)
+        await state.run_in_worker(_mark_cancelled, lease.worker_url)
         await state.run_in_worker(release_lease, lease)
         raise
     await state.run_in_worker(_mark_running, lease.worker_url, operation)
@@ -705,6 +714,7 @@ def create_project(name: str, parent_dir: str = "") -> dict[str, Any]:
         slot.project_id = record.project_id
         slot.project_name = record.name
         slot.error = None
+        _touch(slot)
         return {
             "project_id": record.project_id,
             "name": record.name,
