@@ -2329,11 +2329,12 @@
       "category": "search",
       "params": [
         "name_pattern",
+        "comment_pattern",
         "offset",
         "limit",
         "program"
       ],
-      "description": "Search functions by name"
+      "description": "Search functions by name and/or comment"
     },
     {
       "path": "/search_functions_by_tag",
