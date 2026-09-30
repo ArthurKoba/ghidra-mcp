@@ -266,3 +266,47 @@ async def test_manual_release_refuses_queued_project(fake_workers):
     finally:
         await project_sessions.release_project_operation(first)
         await asyncio.wait_for(waiter, timeout=2)
+
+
+def test_disabled_worker_is_removed_from_project_routing(fake_workers):
+    ids = _ids()
+
+    state = project_sessions.set_worker_enabled(0, False)
+    assert state["enabled"] is False
+
+    beta = project_sessions.checkout(ids["beta"])
+    try:
+        assert beta.worker_url == "http://127.0.0.1:8090"
+    finally:
+        project_sessions.release_lease(beta)
+
+    listed = project_sessions.list_projects()
+    assert listed["workers"][0]["enabled"] is False
+    assert listed["workers"][1]["enabled"] is True
+
+
+def test_disabling_idle_worker_closes_its_project(fake_workers):
+    ids = _ids()
+    lease = project_sessions.checkout(ids["alpha"])
+    project_sessions.release_lease(lease)
+    assert fake_workers["http://127.0.0.1:8089"] == "alpha"
+
+    state = project_sessions.set_worker_enabled(0, False)
+
+    assert state["enabled"] is False
+    assert state["project_id"] is None
+    assert fake_workers["http://127.0.0.1:8089"] is None
+
+
+@pytest.mark.asyncio
+async def test_disabling_busy_worker_is_rejected(fake_workers):
+    ids = _ids()
+    lease = await project_sessions.acquire_project_operation(ids["alpha"], "busy-op")
+    try:
+        with pytest.raises(project_sessions.ProjectBusyError, match="Worker 0 is busy"):
+            project_sessions.set_worker_enabled(0, False)
+    finally:
+        await project_sessions.release_project_operation(lease)
+
+    state = project_sessions.set_worker_enabled(0, True)
+    assert state["enabled"] is True

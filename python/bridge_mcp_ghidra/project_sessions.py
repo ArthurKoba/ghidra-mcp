@@ -51,6 +51,7 @@ class WorkerSlot:
     running: int = 0
     current_operation: str | None = None
     last_used_at: float = 0.0
+    enabled: bool = True
     error: str | None = None
 
 
@@ -334,6 +335,7 @@ def _slot_status(index: int, slot: WorkerSlot) -> dict[str, Any]:
         "last_used_at": _timestamp(slot.last_used_at),
         "idle_seconds": round(idle_seconds, 3) if idle_seconds is not None else None,
         "idle_timeout_seconds": timeout,
+        "enabled": slot.enabled,
         "auto_release_eligible": bool(
             slot.project_id
             and timeout > 0
@@ -460,7 +462,10 @@ def checkout(project_id: str) -> ProjectLease:
                 (
                     item
                     for item in _slots.values()
-                    if item.project_id is None and item.project_name is None and item.error is None
+                    if item.enabled
+                    and item.project_id is None
+                    and item.project_name is None
+                    and item.error is None
                 ),
                 None,
             )
@@ -553,6 +558,59 @@ async def release_project_operation(lease: ProjectLease) -> None:
     if lock is not None and lock.locked():
         lock.release()
     await state.run_in_worker(release_lease, lease)
+
+
+def set_worker_enabled(
+    worker_index: int,
+    enabled: bool,
+    close_project: bool = True,
+) -> dict[str, Any]:
+    """Enable or disable one worker slot for project routing.
+
+    Disabling does not kill the JVM. It removes the worker from routing and,
+    when idle, optionally closes its active project session first.
+    """
+
+    with _lock:
+        _sync_worker_config_locked()
+        slots = list(_slots.values())
+        if worker_index < 0 or worker_index >= len(slots):
+            raise ProjectSessionError(
+                f"Unknown worker_index {worker_index}; configured workers: {len(slots)}"
+            )
+        slot = slots[worker_index]
+
+        if enabled:
+            slot.enabled = True
+            return {
+                **_slot_status(worker_index, slot),
+                "changed": True,
+            }
+
+        if slot.in_flight or slot.queued or slot.running:
+            raise ProjectBusyError(
+                f"Worker {worker_index} is busy: "
+                f"in_flight={slot.in_flight}, queued={slot.queued}, running={slot.running}"
+            )
+
+        if close_project and (slot.project_id or slot.project_name):
+            _request(
+                slot.url,
+                "POST",
+                "/close_project",
+                json_data={"dry_run": False},
+                timeout=30,
+            )
+            slot.project_id = None
+            slot.project_name = None
+            slot.current_operation = None
+            slot.last_used_at = 0.0
+
+        slot.enabled = False
+        return {
+            **_slot_status(worker_index, slot),
+            "changed": True,
+        }
 
 
 def release_idle_sessions(now: float | None = None) -> list[str]:
@@ -670,7 +728,8 @@ def _idle_slot_locked() -> WorkerSlot:
         (
             item
             for item in _slots.values()
-            if item.project_id is None
+            if item.enabled
+            and item.project_id is None
             and item.project_name is None
             and item.in_flight == 0
             and item.error is None

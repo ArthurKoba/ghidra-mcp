@@ -113,6 +113,29 @@ async def release_project_session(project_id: str, close_project: bool = True) -
 
 
 @mcp.tool()
+async def set_worker_enabled(
+    worker_index: int,
+    enabled: bool,
+    close_project: bool = True,
+) -> str:
+    """Enable or disable a worker slot for new project routing.
+
+    Disabling a busy worker is refused. This is maintenance mode, not a JVM kill.
+    """
+
+    try:
+        result = await state.run_in_worker(
+            project_sessions.set_worker_enabled,
+            worker_index,
+            enabled,
+            close_project,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 async def create_project(name: str, parent_dir: str = "") -> str:
     """Create a project through an idle worker and return its stable project_id."""
     try:
