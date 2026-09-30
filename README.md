@@ -978,6 +978,7 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `set_project_idle_timeout` - set_project_idle_timeout
 - `set_worker_enabled` - set_worker_enabled
 - `unload_tool_group` - Unregister a tool group's dynamic tools
+
 <!-- END GENERATED API REFERENCE -->
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
