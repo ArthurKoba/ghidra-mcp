@@ -27,6 +27,7 @@ import ghidra.program.model.pcode.HighVariable;
 import ghidra.program.model.pcode.PcodeOp;
 import ghidra.program.model.pcode.PcodeOpAST;
 import ghidra.program.model.pcode.Varnode;
+import ghidra.program.model.scalar.Scalar;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
 import ghidra.program.model.symbol.ReferenceManager;
@@ -2375,7 +2376,8 @@ public class AnalysisService {
                     }
 
                     // Surface data dependencies in the same semantic inspection call.
-                    Map<String, Object> touched = collectTouchedData(program, func);
+                    Map<String, Object> touched =
+                            collectTouchedData(program, func, decompResults);
                     data.put("strings_touched", touched.get("strings"));
                     data.put("globals_touched", touched.get("globals"));
 
@@ -2551,7 +2553,10 @@ public class AnalysisService {
     // Private helper methods
     // ========================================================================
 
-    private static Map<String, Object> collectTouchedData(Program program, Function func) {
+    private static Map<String, Object> collectTouchedData(
+            Program program,
+            Function func,
+            DecompileResults decompResults) {
         Listing listing = program.getListing();
         ReferenceManager refManager = program.getReferenceManager();
         Map<String, Map<String, Object>> stringsByAddress = new LinkedHashMap<>();
@@ -2560,44 +2565,81 @@ public class AnalysisService {
         InstructionIterator instructions = listing.getInstructions(func.getBody(), true);
         while (instructions.hasNext()) {
             Instruction instruction = instructions.next();
+
             for (Reference ref : refManager.getReferencesFrom(instruction.getAddress())) {
                 if (ref.getReferenceType().isFlow()
                         || ref.getReferenceType().isCall()
                         || ref.getReferenceType().isJump()) {
                     continue;
                 }
-                Address target = ref.getToAddress();
-                if (target == null || !program.getMemory().contains(target)
-                        || func.getBody().contains(target)) {
-                    continue;
-                }
-                if (program.getFunctionManager().getFunctionAt(target) != null) {
-                    continue;
-                }
+                recordTouchedTarget(
+                        program,
+                        func,
+                        ref.getToAddress(),
+                        "direct_data_reference",
+                        instruction.getAddress(),
+                        stringsByAddress,
+                        globalsByAddress);
+            }
 
-                Data data = listing.getDataContaining(target);
-                if (data != null && ServiceUtils.isStringData(data)) {
-                    String address = data.getAddress().toString(false);
-                    Map<String, Object> item = new LinkedHashMap<>();
-                    item.putAll(ServiceUtils.addressToJson(data.getAddress(), program));
-                    Object value = data.getValue();
-                    item.put("value", value != null ? value.toString() : "");
-                    item.put("type", data.getDataType().getName());
-                    stringsByAddress.putIfAbsent(address, item);
-                    continue;
+            int operandCount = instruction.getNumOperands();
+            for (int operandIndex = 0; operandIndex < operandCount; operandIndex++) {
+                Object[] operandObjects = instruction.getOpObjects(operandIndex);
+                for (Object operandObject : operandObjects) {
+                    Address candidate = null;
+                    if (operandObject instanceof Address address) {
+                        candidate = address;
+                    } else if (operandObject instanceof Scalar scalar) {
+                        try {
+                            candidate = program.getAddressFactory()
+                                    .getDefaultAddressSpace()
+                                    .getAddress(scalar.getUnsignedValue());
+                        } catch (Exception ignored) {
+                            candidate = null;
+                        }
+                    }
+                    recordTouchedTarget(
+                            program,
+                            func,
+                            candidate,
+                            "operand_address",
+                            instruction.getAddress(),
+                            stringsByAddress,
+                            globalsByAddress);
                 }
+            }
+        }
 
-                String address = target.toString(false);
-                Map<String, Object> item = new LinkedHashMap<>();
-                item.putAll(ServiceUtils.addressToJson(target, program));
-                Symbol primary = program.getSymbolTable().getPrimarySymbol(target);
-                if (primary != null) {
-                    item.put("name", primary.getName());
+        if (decompResults != null && decompResults.decompileCompleted()) {
+            HighFunction highFunction = decompResults.getHighFunction();
+            if (highFunction != null) {
+                Iterator<PcodeOpAST> operations = highFunction.getPcodeOps();
+                while (operations.hasNext()) {
+                    PcodeOpAST operation = operations.next();
+                    Address operationAddress = operation.getSeqnum().getTarget();
+                    for (int inputIndex = 0; inputIndex < operation.getNumInputs(); inputIndex++) {
+                        Varnode input = operation.getInput(inputIndex);
+                        if (input == null || !input.isConstant()) {
+                            continue;
+                        }
+                        Address candidate;
+                        try {
+                            candidate = program.getAddressFactory()
+                                    .getDefaultAddressSpace()
+                                    .getAddress(input.getOffset());
+                        } catch (Exception ignored) {
+                            continue;
+                        }
+                        recordTouchedTarget(
+                                program,
+                                func,
+                                candidate,
+                                "ir_constant",
+                                operationAddress,
+                                stringsByAddress,
+                                globalsByAddress);
+                    }
                 }
-                if (data != null && data.getDataType() != null) {
-                    item.put("type", data.getDataType().getName());
-                }
-                globalsByAddress.putIfAbsent(address, item);
             }
         }
 
@@ -2605,6 +2647,88 @@ public class AnalysisService {
                 "strings", new ArrayList<>(stringsByAddress.values()),
                 "globals", new ArrayList<>(globalsByAddress.values())
         );
+    }
+
+    private static void recordTouchedTarget(
+            Program program,
+            Function func,
+            Address target,
+            String evidence,
+            Address observedAt,
+            Map<String, Map<String, Object>> stringsByAddress,
+            Map<String, Map<String, Object>> globalsByAddress) {
+        if (target == null
+                || !program.getMemory().contains(target)
+                || func.getBody().contains(target)
+                || program.getFunctionManager().getFunctionAt(target) != null) {
+            return;
+        }
+
+        Listing listing = program.getListing();
+        Data data = listing.getDataContaining(target);
+        Symbol primary = program.getSymbolTable().getPrimarySymbol(target);
+
+        // Keep this extraction evidence-backed and cheap: an arbitrary numeric
+        // constant is not enough. The target must resolve to defined data or a
+        // named symbol before it is surfaced.
+        if (data == null && primary == null) {
+            return;
+        }
+
+        if (data != null && ServiceUtils.isStringData(data)) {
+            Address dataAddress = data.getAddress();
+            String key = dataAddress.toString(false);
+            Map<String, Object> item = stringsByAddress.computeIfAbsent(
+                    key,
+                    ignored -> {
+                        Map<String, Object> created = new LinkedHashMap<>();
+                        created.putAll(ServiceUtils.addressToJson(dataAddress, program));
+                        Object value = data.getValue();
+                        created.put("value", value != null ? value.toString() : "");
+                        created.put("type", data.getDataType().getName());
+                        created.put("evidence", new ArrayList<String>());
+                        created.put("observed_at", new ArrayList<String>());
+                        return created;
+                    });
+            appendTouchedEvidence(item, evidence, observedAt);
+            return;
+        }
+
+        String key = target.toString(false);
+        Map<String, Object> item = globalsByAddress.computeIfAbsent(
+                key,
+                ignored -> {
+                    Map<String, Object> created = new LinkedHashMap<>();
+                    created.putAll(ServiceUtils.addressToJson(target, program));
+                    if (primary != null) {
+                        created.put("name", primary.getName());
+                    }
+                    if (data != null && data.getDataType() != null) {
+                        created.put("type", data.getDataType().getName());
+                    }
+                    created.put("evidence", new ArrayList<String>());
+                    created.put("observed_at", new ArrayList<String>());
+                    return created;
+                });
+        appendTouchedEvidence(item, evidence, observedAt);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void appendTouchedEvidence(
+            Map<String, Object> item,
+            String evidence,
+            Address observedAt) {
+        List<String> evidenceList = (List<String>) item.get("evidence");
+        if (evidenceList != null && !evidenceList.contains(evidence)) {
+            evidenceList.add(evidence);
+        }
+        List<String> locations = (List<String>) item.get("observed_at");
+        if (locations != null && observedAt != null) {
+            String location = observedAt.toString(false);
+            if (!locations.contains(location) && locations.size() < 8) {
+                locations.add(location);
+            }
+        }
     }
 
 
