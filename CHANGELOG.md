@@ -27,6 +27,10 @@ Complete version history for the Ghidra MCP Server project.
 - Function rename invalidates the analysis name cache immediately after
   publishing program events.
 
+- Semantic function-name references now bypass address-only normalization for
+  decompile/disassemble/function lookup/comment/global-audit/force-decompile reads,
+  so names are no longer rewritten into bogus `0x<name>` strings.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

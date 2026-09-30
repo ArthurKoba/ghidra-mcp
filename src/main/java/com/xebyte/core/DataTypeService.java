@@ -4388,7 +4388,7 @@ public class DataTypeService {
             description = "Audit every global variable referenced from within a function in one call. Walks the function's instructions, collects unique data references, and returns the per-global audit (same shape as audit_global) plus a summary of how many are fully documented vs have issues. The killer per-function pre-flight tool — start every doc pass with this when the function has global xrefs.",
             category = "datatype")
     public Response auditGlobalsInFunction(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "address",
                    description = "Function name or address (NOT a global address).") String addressStr,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);

@@ -154,7 +154,7 @@ public class FunctionService {
      */
     @McpTool(path = "/decompile_function", description = "Decompile ONE function (address/name) OR MANY (functions=comma-separated names/addresses) to pseudocode. In bulk mode, timeout is applied independently to each function, so one slow function does not consume a shared batch timeout. On programs with multiple address spaces, prefix addresses with the space name (mem:1000).", category = "function")
     public Response decompileFunctionByAddress(
-            @Param(value = "address", paramType = "address", defaultValue = "",
+            @Param(value = "address", defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
             @Param(value = "functions", defaultValue = "",
                    description = "Bulk mode: comma-separated function references (names or addresses). When set, address is ignored.") String functionsParam,
@@ -396,14 +396,10 @@ public class FunctionService {
     /**
      * Force a fresh decompilation of a function (flushing cached results).
      */
-    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/force_decompile", description = "Force decompiler cache refresh for a function by name or address. On programs with multiple address spaces, prefix addresses with the space name.", category = "function")
     public Response forceDecompile(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String functionAddrStr,
+            @Param(value = "address",
+                   description = "Function name or address. Addresses accept 0x<hex> or <space>:<hex>.") String functionAddrStr,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -418,18 +414,15 @@ public class FunctionService {
         final AtomicReference<String> functionName = new AtomicReference<>();
         final AtomicReference<String> decompiledCode = new AtomicReference<>();
 
-        // Resolve address before entering threading lambda
-        Address addr = ServiceUtils.parseAddress(program, functionAddrStr);
-        if (addr == null) return Response.err(ServiceUtils.getLastParseError());
+        Function targetFunction = ServiceUtils.resolveFunction(program, functionAddrStr);
+        if (targetFunction == null) {
+            return Response.err("No function found for " + functionAddrStr);
+        }
 
         try {
             threadingStrategy.executeRead(() -> {
                 try {
-                    Function func = program.getFunctionManager().getFunctionAt(addr);
-                    if (func == null) {
-                        errorMessage.set("No function found at address " + functionAddrStr);
-                        return null;
-                    }
+                    Function func = targetFunction;
 
                     // Create new decompiler interface
                     DecompInterface decompiler = ServiceUtils.createConfiguredDecompiler(program);
@@ -507,7 +500,7 @@ public class FunctionService {
      */
     @McpTool(path = "/disassemble_function", description = "Get assembly listing of a function by name or address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response disassembleFunction(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "address",
                    description = "Function name or address. Addresses accept 0x<hex> or <space>:<hex>.") String addressStr,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
@@ -562,12 +555,8 @@ public class FunctionService {
      */
     @McpTool(path = "/get_function_by_address", description = "Get function info at a specific address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response getFunctionByAddress(
-            @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+            @Param(value = "address",
+                   description = "Function name or address. Addresses accept 0x<hex> or <space>:<hex>.") String addressStr,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
