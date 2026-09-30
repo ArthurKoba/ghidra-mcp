@@ -126,7 +126,6 @@ public class ProgramScriptService {
             int txId = program.startTransaction("GhidraMCP auto-analysis");
             boolean txOk = false;
             try {
-                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
                 if (force) {
                     mgr.reAnalyzeAll(null);
                 }
