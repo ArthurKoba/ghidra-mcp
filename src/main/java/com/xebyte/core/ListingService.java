@@ -296,9 +296,10 @@ public class ListingService {
                 "defined", "all", 1, false, programName);
     }
 
-    @McpTool(path = "/search_functions", description = "Search functions by name pattern. Omit name_pattern to list all functions.", category = "listing")
+    @McpTool(path = "/search_functions", description = "Search functions by name and/or comment pattern. Omit both patterns to list all functions.", category = "listing")
     public Response searchFunctionsByName(
-            @Param(value = "name_pattern", description = "Substring to match against function names (omit or leave empty to return all functions)", defaultValue = "") String searchTerm,
+            @Param(value = "name_pattern", description = "Case-insensitive substring to match against function names; omit to ignore name filtering", defaultValue = "") String searchTerm,
+            @Param(value = "comment_pattern", description = "Case-insensitive substring to match against function plate/listing comments; omit to ignore comment filtering", defaultValue = "") String commentPattern,
             @Param(value = "offset", defaultValue = "0") int offset,
             @Param(value = "limit", defaultValue = "100") int limit,
             @Param(value = "program", description = "Target program name (omit to use the active program — always specify when multiple programs are open)", defaultValue = "") String programName) {
@@ -306,19 +307,45 @@ public class ListingService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
-        if (searchTerm == null || searchTerm.isEmpty()) return Response.err("Search term is required");
+        String nameNeedle = searchTerm != null ? searchTerm.trim().toLowerCase(Locale.ROOT) : "";
+        String commentNeedle = commentPattern != null ? commentPattern.trim().toLowerCase(Locale.ROOT) : "";
+        Listing programListing = program.getListing();
 
-        List<String> matches = new ArrayList<>();
+        List<Map<String, Object>> matches = new ArrayList<>();
         for (Function func : program.getFunctionManager().getFunctions(true)) {
             String name = func.getName();
-            if (name.toLowerCase().contains(searchTerm.toLowerCase())) {
-                matches.add(String.format("%s @ %s", name, func.getEntryPoint()));
+            if (!nameNeedle.isEmpty() && !name.toLowerCase(Locale.ROOT).contains(nameNeedle)) {
+                continue;
             }
+
+            String plate = func.getComment();
+            String pre = programListing.getComment(CodeUnit.PRE_COMMENT, func.getEntryPoint());
+            String eol = programListing.getComment(CodeUnit.EOL_COMMENT, func.getEntryPoint());
+            String commentText = String.join("\n",
+                    plate != null ? plate : "",
+                    pre != null ? pre : "",
+                    eol != null ? eol : "");
+            if (!commentNeedle.isEmpty()
+                    && !commentText.toLowerCase(Locale.ROOT).contains(commentNeedle)) {
+                continue;
+            }
+
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", name);
+            entry.putAll(ServiceUtils.addressToJson(func.getEntryPoint(), program));
+            if (plate != null && !plate.isBlank()) {
+                entry.put("comment", plate);
+            }
+            matches.add(entry);
         }
 
-        Collections.sort(matches);
-
+        matches.sort(Comparator.comparing(m -> (String) m.get("name")));
         return ServiceUtils.paged("functions", matches, offset, limit);
+    }
+
+    public Response searchFunctionsByName(
+            String searchTerm, int offset, int limit, String programName) {
+        return searchFunctionsByName(searchTerm, "", offset, limit, programName);
     }
 
     @McpTool(path = "/list_functions", description = "List all functions (no pagination)", category = "listing")
