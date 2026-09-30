@@ -10,6 +10,7 @@ from . import discovery
 from . import dispatch
 from . import project_sessions
 from . import registry
+from . import session_settings
 from . import state
 from . import transport
 from . import worker_control
@@ -133,6 +134,26 @@ async def set_worker_enabled(
         )
         return json.dumps(result, indent=2)
     except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def project_session_settings() -> str:
+    """Return effective persistent project-session lifecycle settings."""
+    return json.dumps(session_settings.get_settings(), indent=2)
+
+
+@mcp.tool()
+async def set_project_idle_timeout(idle_timeout_seconds: float) -> str:
+    """Persist the idle auto-release timeout; zero disables auto-release."""
+    try:
+        result = await state.run_in_worker(
+            session_settings.set_idle_timeout_seconds,
+            idle_timeout_seconds,
+        )
+        await state.run_in_worker(project_sessions.refresh_idle_sweeper)
+        return json.dumps(result, indent=2)
+    except (OSError, ValueError) as exc:
         return json.dumps({"error": str(exc)})
 
 

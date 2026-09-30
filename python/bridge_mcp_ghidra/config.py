@@ -100,6 +100,8 @@ MANAGEMENT_TOOL_NAMES = {
     "delete_project",
     "project_session_info",
     "release_project_session",
+    "set_project_idle_timeout",
+    "project_session_settings",
     "set_worker_enabled",
     "list_tool_groups",
     "load_tool_group",

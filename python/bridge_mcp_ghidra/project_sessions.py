@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from . import state, transport
+from . import session_settings, state, transport
 from .config import DEFAULT_TCP_URL, logger
 from .validation import validate_server_url
 
@@ -72,11 +72,7 @@ _sweeper_thread: threading.Thread | None = None
 
 
 def _idle_timeout_seconds() -> float:
-    raw = os.getenv("GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS", "900").strip()
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return 900.0
+    return session_settings.idle_timeout_seconds()
 
 
 def _idle_sweep_interval_seconds() -> float:
@@ -128,6 +124,11 @@ def _ensure_idle_sweeper_locked() -> None:
         daemon=True,
     )
     _sweeper_thread.start()
+
+
+def refresh_idle_sweeper() -> None:
+    with _lock:
+        _ensure_idle_sweeper_locked()
 
 
 def _decode_payload(text: str) -> Any:
