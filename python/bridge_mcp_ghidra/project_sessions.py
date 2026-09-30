@@ -264,7 +264,6 @@ def _refresh_catalog_locked(search_dir: str = "") -> dict[str, ProjectRecord]:
     workers_by_project: dict[str, set[str]] = {}
     errors: list[str] = []
     params = {"searchDir": search_dir} if search_dir else None
-
     for url in _configured_urls:
         try:
             records = _project_records(
