@@ -127,12 +127,16 @@ public class CommentService {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address or function name is required");
         }
-        Function function = ServiceUtils.resolveFunction(program, addressStr);
-        Address addr = function != null
-                ? function.getEntryPoint()
-                : ServiceUtils.parseAddress(program, addressStr);
+        // Preserve exact-address comment reads (including instruction/data
+        // addresses). Only fall back to a function-name lookup when the input
+        // is not a valid address.
+        Address addr = ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) {
-            return Response.err(ServiceUtils.getLastParseError());
+            Function function = ServiceUtils.resolveFunction(program, addressStr);
+            if (function == null) {
+                return Response.err("No address or function found for " + addressStr);
+            }
+            addr = function.getEntryPoint();
         }
 
         Listing listing = program.getListing();
