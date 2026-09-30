@@ -2657,16 +2657,16 @@ public class AnalysisService {
             Address observedAt,
             Map<String, Map<String, Object>> stringsByAddress,
             Map<String, Map<String, Object>> globalsByAddress) {
-        target = resolveLoadedAlias(program, target);
-        if (target == null
-                || func.getBody().contains(target)
-                || program.getFunctionManager().getFunctionAt(target) != null) {
+        Address resolvedTarget = resolveLoadedAlias(program, target);
+        if (resolvedTarget == null
+                || func.getBody().contains(resolvedTarget)
+                || program.getFunctionManager().getFunctionAt(resolvedTarget) != null) {
             return;
         }
 
         Listing listing = program.getListing();
-        Data data = listing.getDataContaining(target);
-        Symbol primary = program.getSymbolTable().getPrimarySymbol(target);
+        Data data = listing.getDataContaining(resolvedTarget);
+        Symbol primary = program.getSymbolTable().getPrimarySymbol(resolvedTarget);
 
         // Keep this extraction evidence-backed and cheap: an arbitrary numeric
         // constant is not enough. The target must resolve to defined data or a
@@ -2694,12 +2694,12 @@ public class AnalysisService {
             return;
         }
 
-        String key = target.toString(false);
+        String key = resolvedTarget.toString(false);
         Map<String, Object> item = globalsByAddress.computeIfAbsent(
                 key,
                 ignored -> {
                     Map<String, Object> created = new LinkedHashMap<>();
-                    created.putAll(ServiceUtils.addressToJson(target, program));
+                    created.putAll(ServiceUtils.addressToJson(resolvedTarget, program));
                     if (primary != null) {
                         created.put("name", primary.getName());
                     }
