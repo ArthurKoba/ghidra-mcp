@@ -22,7 +22,8 @@ Complete version history for the Ghidra MCP Server project.
   the function alongside callers/callees and behavior.
 - Bulk `decompile_function(functions=...)` now honors `timeout` per function
   instead of silently using a fixed 30-second timeout for the whole bulk path.
-- `audit_globals_in_function` accepts a function name as well as an address.
+- `audit_globals_in_function`, `disassemble_function`, and `get_comment`
+  accept function names as well as addresses for read-only semantic workflows.
 - Function rename invalidates the analysis name cache immediately after
   publishing program events.
 

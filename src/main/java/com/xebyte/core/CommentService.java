@@ -115,20 +115,22 @@ public class CommentService {
      * addresses. Unlike get_plate_comment, this does not require a function at the address --
      * so it can read the plate/EOL comment attached to a global/data symbol.
      */
-    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) at ANY address, including data addresses (works on functions and data globals alike). All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
+    @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) by function name or address, including data addresses. All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
     public Response getComment(
             @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex>. "
-                               + "Works for data addresses, not just functions.") String addressStr,
+                   description = "Function name or address. Addresses may identify code or data.") String addressStr,
             @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
 
         if (addressStr == null || addressStr.isEmpty()) {
-            return Response.err("address parameter is required");
+            return Response.err("address or function name is required");
         }
-        Address addr = ServiceUtils.parseAddress(program, addressStr);
+        Function function = ServiceUtils.resolveFunction(program, addressStr);
+        Address addr = function != null
+                ? function.getEntryPoint()
+                : ServiceUtils.parseAddress(program, addressStr);
         if (addr == null) {
             return Response.err(ServiceUtils.getLastParseError());
         }

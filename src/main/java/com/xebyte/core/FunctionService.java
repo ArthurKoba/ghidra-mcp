@@ -505,14 +505,10 @@ public class FunctionService {
      * Get assembly code for a function.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/disassemble_function", description = "Get assembly listing of function. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
+    @McpTool(path = "/disassemble_function", description = "Get assembly listing of a function by name or address. On programs with multiple address spaces (e.g., embedded targets), prefix addresses with the space name (mem:1000) to avoid ambiguous resolution.", category = "function")
     public Response disassembleFunction(
             @Param(value = "address", paramType = "address",
-                   description = "Address in the program. Accepts 0x<hex> (default space) or <space>:<hex> "
-                               + "(e.g., mem:1000, code:ff00). Note: some programs — particularly "
-                               + "embedded/microcontroller targets — are not address-space-agnostic; "
-                               + "use get_address_spaces to discover spaces before assuming a plain hex "
-                               + "address is unambiguous.") String addressStr,
+                   description = "Function name or address. Addresses accept 0x<hex> or <space>:<hex>.") String addressStr,
             @Param(value = "program", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -520,10 +516,8 @@ public class FunctionService {
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address is required");
 
         try {
-            Address addr = ServiceUtils.parseAddress(program, addressStr);
-            if (addr == null) return Response.err(ServiceUtils.getLastParseError());
-            Function func = ServiceUtils.getFunctionForAddress(program, addr);
-            if (func == null) return Response.err("No function found at or containing address " + addressStr);
+            Function func = ServiceUtils.resolveFunction(program, addressStr);
+            if (func == null) return Response.err("No function found for " + addressStr);
 
             StringBuilder sb = new StringBuilder();
             Listing listing = program.getListing();
