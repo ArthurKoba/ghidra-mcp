@@ -2587,9 +2587,11 @@ public class AnalysisService {
                 Object[] operandObjects = instruction.getOpObjects(operandIndex);
                 for (Object operandObject : operandObjects) {
                     Address candidate = null;
+                    String operandEvidence = "operand_address";
                     if (operandObject instanceof Address address) {
                         candidate = address;
                     } else if (operandObject instanceof Scalar scalar) {
+                        operandEvidence = "operand_literal";
                         try {
                             candidate = program.getAddressFactory()
                                     .getDefaultAddressSpace()
@@ -2602,7 +2604,7 @@ public class AnalysisService {
                             program,
                             func,
                             candidate,
-                            "operand_address",
+                            operandEvidence,
                             instruction.getAddress(),
                             stringsByAddress,
                             globalsByAddress);
@@ -2667,30 +2669,33 @@ public class AnalysisService {
         Listing listing = program.getListing();
         Data data = listing.getDataContaining(resolvedTarget);
         Symbol primary = program.getSymbolTable().getPrimarySymbol(resolvedTarget);
+        String rawString = readPrintableString(program, resolvedTarget);
 
-        // Keep this extraction evidence-backed and cheap: an arbitrary numeric
-        // constant is not enough. The target must resolve to defined data or a
-        // named symbol before it is surfaced.
-        if (data == null && primary == null) {
-            return;
-        }
-
-        if (data != null && ServiceUtils.isStringData(data)) {
-            Address dataAddress = data.getAddress();
+        if ((data != null && ServiceUtils.isStringData(data)) || rawString != null) {
+            Address dataAddress = data != null ? data.getAddress() : resolvedTarget;
             String key = dataAddress.toString(false);
             Map<String, Object> item = stringsByAddress.computeIfAbsent(
                     key,
                     ignored -> {
                         Map<String, Object> created = new LinkedHashMap<>();
                         created.putAll(ServiceUtils.addressToJson(dataAddress, program));
-                        Object value = data.getValue();
+                        Object value = data != null ? data.getValue() : rawString;
                         created.put("value", value != null ? value.toString() : "");
-                        created.put("type", data.getDataType().getName());
+                        created.put(
+                                "type",
+                                data != null ? data.getDataType().getName() : "char[]");
                         created.put("evidence", new ArrayList<String>());
                         created.put("observed_at", new ArrayList<String>());
                         return created;
                     });
             appendTouchedEvidence(item, evidence, observedAt);
+            return;
+        }
+
+        boolean directEvidence =
+                "direct_data_reference".equals(evidence)
+                || "operand_address".equals(evidence);
+        if (data == null && primary == null && !directEvidence) {
             return;
         }
 
@@ -2711,6 +2716,34 @@ public class AnalysisService {
                     return created;
                 });
         appendTouchedEvidence(item, evidence, observedAt);
+    }
+
+    private static String readPrintableString(Program program, Address start) {
+        if (start == null || !program.getMemory().contains(start)) {
+            return null;
+        }
+        StringBuilder value = new StringBuilder();
+        for (int index = 0; index < 256; index++) {
+            try {
+                Address current = start.add(index);
+                if (!program.getMemory().contains(current)) {
+                    return null;
+                }
+                int raw = program.getMemory().getByte(current) & 0xFF;
+                if (raw == 0) {
+                    return value.length() >= 4 ? value.toString() : null;
+                }
+                if (raw == '\n' || raw == '\r' || raw == '\t'
+                        || (raw >= 32 && raw < 127)) {
+                    value.append((char) raw);
+                } else {
+                    return null;
+                }
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private static Address resolveLoadedAlias(Program program, Address target) {
