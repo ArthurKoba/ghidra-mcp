@@ -1,3 +1,5 @@
+import asyncio
+import time
 import json
 from unittest.mock import patch
 
@@ -19,6 +21,7 @@ def reset_sessions(monkeypatch):
         "GHIDRA_MCP_WORKER_URLS",
         "http://127.0.0.1:8089,http://127.0.0.1:8090",
     )
+    monkeypatch.setenv("GHIDRA_MCP_PROJECT_IDLE_SWEEP_SECONDS", "3600")
     project_sessions.reset_for_tests()
     yield
     project_sessions.reset_for_tests()
@@ -156,7 +159,7 @@ def test_release_refuses_to_close_project_with_in_flight_request(fake_workers):
     ids = _ids()
     lease = project_sessions.checkout(ids["alpha"])
     try:
-        with pytest.raises(project_sessions.ProjectBusyError, match="in-flight"):
+        with pytest.raises(project_sessions.ProjectBusyError, match="busy"):
             project_sessions.release_project_session(ids["alpha"])
     finally:
         project_sessions.release_lease(lease)
@@ -177,3 +180,89 @@ def test_list_projects_reports_session_and_worker_state(fake_workers):
         assert listed["worker_count"] == 2
     finally:
         project_sessions.release_lease(lease)
+
+
+@pytest.mark.asyncio
+async def test_same_project_operations_run_fifo(fake_workers):
+    ids = _ids()
+    first = await project_sessions.acquire_project_operation(ids["alpha"], "first")
+    order = []
+
+    async def run(name):
+        lease = await project_sessions.acquire_project_operation(ids["alpha"], name)
+        try:
+            order.append(name)
+        finally:
+            await project_sessions.release_project_operation(lease)
+
+    second = asyncio.create_task(run("second"))
+    third = asyncio.create_task(run("third"))
+    await asyncio.sleep(0.05)
+
+    info = project_sessions.session_info(ids["alpha"])
+    assert info["running"] is True
+    assert info["current_operation"] == "first"
+    assert info["queued"] == 2
+    assert info["in_flight"] == 3
+
+    await project_sessions.release_project_operation(first)
+    await asyncio.wait_for(asyncio.gather(second, third), timeout=2)
+
+    assert order == ["second", "third"]
+    info = project_sessions.session_info(ids["alpha"])
+    assert info["running"] is False
+    assert info["queued"] == 0
+    assert info["in_flight"] == 0
+
+
+@pytest.mark.asyncio
+async def test_different_project_workers_run_in_parallel(fake_workers):
+    ids = _ids()
+    alpha = await project_sessions.acquire_project_operation(ids["alpha"], "alpha-op")
+    beta = await project_sessions.acquire_project_operation(ids["beta"], "beta-op")
+    try:
+        alpha_info = project_sessions.session_info(ids["alpha"])
+        beta_info = project_sessions.session_info(ids["beta"])
+        assert alpha_info["running"] is True
+        assert beta_info["running"] is True
+        assert alpha.worker_url != beta.worker_url
+    finally:
+        await project_sessions.release_project_operation(alpha)
+        await project_sessions.release_project_operation(beta)
+
+
+def test_idle_project_session_is_auto_releasable(fake_workers, monkeypatch):
+    monkeypatch.setenv("GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS", "1")
+    ids = _ids()
+    lease = project_sessions.checkout(ids["alpha"])
+    project_sessions.release_lease(lease)
+
+    released = project_sessions.release_idle_sessions(now=time.time() + 2)
+
+    assert released == [ids["alpha"]]
+    assert fake_workers["http://127.0.0.1:8089"] is None
+    info = project_sessions.session_info(ids["alpha"])
+    assert info["session"] == "available"
+
+
+@pytest.mark.asyncio
+async def test_manual_release_refuses_queued_project(fake_workers):
+    ids = _ids()
+    first = await project_sessions.acquire_project_operation(ids["alpha"], "first")
+
+    waiter_started = asyncio.Event()
+
+    async def wait_for_turn():
+        waiter_started.set()
+        lease = await project_sessions.acquire_project_operation(ids["alpha"], "second")
+        await project_sessions.release_project_operation(lease)
+
+    waiter = asyncio.create_task(wait_for_turn())
+    await waiter_started.wait()
+    await asyncio.sleep(0.05)
+    try:
+        with pytest.raises(project_sessions.ProjectBusyError, match="busy"):
+            project_sessions.release_project_session(ids["alpha"])
+    finally:
+        await project_sessions.release_project_operation(first)
+        await asyncio.wait_for(waiter, timeout=2)

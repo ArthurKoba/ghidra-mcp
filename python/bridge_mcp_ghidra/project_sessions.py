@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
 import posixpath
 import threading
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 
 from . import state, transport
-from .config import DEFAULT_TCP_URL
+from .config import DEFAULT_TCP_URL, logger
 from .validation import validate_server_url
 
 
@@ -44,6 +47,10 @@ class WorkerSlot:
     project_id: str | None = None
     project_name: str | None = None
     in_flight: int = 0
+    queued: int = 0
+    running: int = 0
+    current_operation: str | None = None
+    last_used_at: float = 0.0
     error: str | None = None
 
 
@@ -58,6 +65,68 @@ _lock = threading.RLock()
 _slots: dict[str, WorkerSlot] = {}
 _configured_urls: tuple[str, ...] = ()
 _catalog: dict[str, ProjectRecord] = {}
+_queue_locks: dict[str, asyncio.Lock] = {}
+_sweeper_stop = threading.Event()
+_sweeper_thread: threading.Thread | None = None
+
+
+def _idle_timeout_seconds() -> float:
+    raw = os.getenv("GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS", "900").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 900.0
+
+
+def _idle_sweep_interval_seconds() -> float:
+    raw = os.getenv("GHIDRA_MCP_PROJECT_IDLE_SWEEP_SECONDS", "30").strip()
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 30.0
+
+
+def _touch(slot: WorkerSlot) -> None:
+    slot.last_used_at = time.time()
+
+
+def _timestamp(value: float) -> str | None:
+    if value <= 0:
+        return None
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
+def _queue_lock(worker_url: str) -> asyncio.Lock:
+    lock = _queue_locks.get(worker_url)
+    if lock is None:
+        lock = asyncio.Lock()
+        _queue_locks[worker_url] = lock
+    return lock
+
+
+def _ensure_idle_sweeper_locked() -> None:
+    global _sweeper_thread, _sweeper_stop
+    if _idle_timeout_seconds() <= 0:
+        return
+    if _sweeper_thread is not None and _sweeper_thread.is_alive():
+        return
+    _sweeper_stop = threading.Event()
+
+    def _loop() -> None:
+        while not _sweeper_stop.wait(_idle_sweep_interval_seconds()):
+            try:
+                released = release_idle_sessions()
+                if released:
+                    logger.info("Auto-released idle project sessions: %s", released)
+            except Exception:
+                logger.exception("Idle project-session sweep failed")
+
+    _sweeper_thread = threading.Thread(
+        target=_loop,
+        name="GhidraMCP-ProjectIdleSweep",
+        daemon=True,
+    )
+    _sweeper_thread.start()
 
 
 def _decode_payload(text: str) -> Any:
@@ -114,6 +183,7 @@ def _sync_worker_config_locked() -> None:
     old = _slots
     _slots = {url: old.get(url, WorkerSlot(url=url)) for url in urls}
     _configured_urls = urls
+    _ensure_idle_sweeper_locked()
 
 
 def _snapshot(url: str, project_name: str | None = None) -> state.ConnectionSnapshot:
@@ -245,16 +315,40 @@ def _reconcile_slots_locked() -> None:
             slot.project_id = None
 
 
+def _slot_status(index: int, slot: WorkerSlot) -> dict[str, Any]:
+    now = time.time()
+    idle_seconds = (
+        max(0.0, now - slot.last_used_at)
+        if slot.project_id is not None and slot.last_used_at > 0
+        else None
+    )
+    timeout = _idle_timeout_seconds()
+    return {
+        "worker_index": index,
+        "project_id": slot.project_id,
+        "project_name": slot.project_name,
+        "in_flight": slot.in_flight,
+        "queued": slot.queued,
+        "running": bool(slot.running),
+        "current_operation": slot.current_operation,
+        "last_used_at": _timestamp(slot.last_used_at),
+        "idle_seconds": round(idle_seconds, 3) if idle_seconds is not None else None,
+        "idle_timeout_seconds": timeout,
+        "auto_release_eligible": bool(
+            slot.project_id
+            and timeout > 0
+            and slot.in_flight == 0
+            and idle_seconds is not None
+            and idle_seconds >= timeout
+        ),
+        "healthy": slot.error is None,
+        "error": slot.error,
+    }
+
+
 def _status_locked() -> list[dict[str, Any]]:
     return [
-        {
-            "worker_index": index,
-            "project_id": slot.project_id,
-            "project_name": slot.project_name,
-            "in_flight": slot.in_flight,
-            "healthy": slot.error is None,
-            "error": slot.error,
-        }
+        _slot_status(index, slot)
         for index, slot in enumerate(_slots.values())
     ]
 
@@ -276,6 +370,10 @@ def list_projects(query: str = "", search_dir: str = "") -> dict[str, Any]:
                     "path": record.path,
                     "session": "active" if slot else "available",
                     "in_flight": slot.in_flight if slot else 0,
+                    "queued": slot.queued if slot else 0,
+                    "running": bool(slot.running) if slot else False,
+                    "current_operation": slot.current_operation if slot else None,
+                    "last_used_at": _timestamp(slot.last_used_at) if slot else None,
                 }
             )
         return {
@@ -348,6 +446,7 @@ def _open_on_slot_locked(slot: WorkerSlot, record: ProjectRecord) -> None:
     slot.project_id = record.project_id
     slot.project_name = record.name
     slot.error = None
+    _touch(slot)
 
 
 def checkout(project_id: str) -> ProjectLease:
@@ -374,6 +473,7 @@ def checkout(project_id: str) -> ProjectLease:
             _open_on_slot_locked(slot, record)
 
         slot.in_flight += 1
+        _touch(slot)
         return ProjectLease(
             project_id=record.project_id,
             worker_url=slot.url,
@@ -387,6 +487,113 @@ def release_lease(lease: ProjectLease) -> None:
         if slot is None or slot.project_id != lease.project_id:
             return
         slot.in_flight = max(0, slot.in_flight - 1)
+        _touch(slot)
+
+
+def _mark_queued(worker_url: str) -> None:
+    with _lock:
+        slot = _slots.get(worker_url)
+        if slot is None:
+            return
+        slot.queued += 1
+        _touch(slot)
+
+
+def _mark_cancelled(worker_url: str) -> None:
+    with _lock:
+        slot = _slots.get(worker_url)
+        if slot is None:
+            return
+        slot.queued = max(0, slot.queued - 1)
+        _touch(slot)
+
+
+def _mark_running(worker_url: str, operation: str) -> None:
+    with _lock:
+        slot = _slots.get(worker_url)
+        if slot is None:
+            return
+        slot.queued = max(0, slot.queued - 1)
+        slot.running = 1
+        slot.current_operation = operation
+        _touch(slot)
+
+
+def _mark_finished(worker_url: str) -> None:
+    with _lock:
+        slot = _slots.get(worker_url)
+        if slot is None:
+            return
+        slot.running = 0
+        slot.current_operation = None
+        _touch(slot)
+
+
+async def acquire_project_operation(project_id: str, operation: str) -> ProjectLease:
+    """Acquire the FIFO execution slot for one project/worker."""
+
+    lease = await state.run_in_worker(checkout, project_id)
+    lock = _queue_lock(lease.worker_url)
+    await state.run_in_worker(_mark_queued, lease.worker_url)
+    try:
+        await lock.acquire()
+    except BaseException:
+        await state.run_in_worker(_mark_cancelled, lease.worker_url)
+        await state.run_in_worker(release_lease, lease)
+        raise
+    await state.run_in_worker(_mark_running, lease.worker_url, operation)
+    return lease
+
+
+async def release_project_operation(lease: ProjectLease) -> None:
+    """Release a project FIFO slot and its worker lease."""
+
+    await state.run_in_worker(_mark_finished, lease.worker_url)
+    lock = _queue_locks.get(lease.worker_url)
+    if lock is not None and lock.locked():
+        lock.release()
+    await state.run_in_worker(release_lease, lease)
+
+
+def release_idle_sessions(now: float | None = None) -> list[str]:
+    """Close project sessions that have been idle past the configured timeout."""
+
+    released: list[str] = []
+    timeout = _idle_timeout_seconds()
+    if timeout <= 0:
+        return released
+    current = time.time() if now is None else now
+    with _lock:
+        _reconcile_slots_locked()
+        for slot in _slots.values():
+            if (
+                slot.project_id is None
+                or slot.in_flight != 0
+                or slot.queued != 0
+                or slot.running != 0
+                or slot.last_used_at <= 0
+                or current - slot.last_used_at < timeout
+            ):
+                continue
+            project_id = slot.project_id
+            try:
+                _request(
+                    slot.url,
+                    "POST",
+                    "/close_project",
+                    json_data={"dry_run": False},
+                    timeout=30,
+                )
+            except Exception as exc:
+                slot.error = str(exc)
+                continue
+            slot.project_id = None
+            slot.project_name = None
+            slot.current_operation = None
+            slot.last_used_at = 0.0
+            slot.error = None
+            released.append(project_id)
+    return released
 
 
 def ensure_session(project_id: str) -> dict[str, Any]:
@@ -418,6 +625,10 @@ def session_info(project_id: str) -> dict[str, Any]:
             "path": record.path,
             "session": "active" if slot else "available",
             "in_flight": slot.in_flight if slot else 0,
+            "queued": slot.queued if slot else 0,
+            "running": bool(slot.running) if slot else False,
+            "current_operation": slot.current_operation if slot else None,
+            "last_used_at": _timestamp(slot.last_used_at) if slot else None,
             "worker_index": list(_slots).index(slot.url) if slot else None,
         }
 
@@ -433,14 +644,17 @@ def release_project_session(project_id: str, close_project: bool = True) -> dict
                 "released": False,
                 "reason": "not_active",
             }
-        if slot.in_flight:
+        if slot.in_flight or slot.queued or slot.running:
             raise ProjectBusyError(
-                f"Project {record.project_id} has {slot.in_flight} in-flight request(s)"
+                f"Project {record.project_id} is busy: "
+                f"in_flight={slot.in_flight}, queued={slot.queued}, running={slot.running}"
             )
         if close_project:
             _request(slot.url, "POST", "/close_project", json_data={"dry_run": False}, timeout=30)
         slot.project_id = None
         slot.project_name = None
+        slot.current_operation = None
+        slot.last_used_at = 0.0
         slot.error = None
         return {
             "project_id": record.project_id,
@@ -500,6 +714,7 @@ def create_project(name: str, parent_dir: str = "") -> dict[str, Any]:
         slot.project_id = record.project_id
         slot.project_name = record.name
         slot.error = None
+        _touch(slot)
         return {
             "project_id": record.project_id,
             "name": record.name,
@@ -542,8 +757,14 @@ def delete_project(project_id: str) -> dict[str, Any]:
 
 
 def reset_for_tests() -> None:
-    global _configured_urls, _slots, _catalog
+    global _configured_urls, _slots, _catalog, _queue_locks, _sweeper_thread
+    _sweeper_stop.set()
+    thread = _sweeper_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=0.2)
     with _lock:
         _configured_urls = ()
         _slots = {}
         _catalog = {}
+        _queue_locks = {}
+        _sweeper_thread = None

@@ -445,7 +445,7 @@ async def import_file(
     pinned to that project's worker for its entire lifetime.
     """
     try:
-        lease = await state.run_in_worker(project_sessions.checkout, project_id)
+        lease = await project_sessions.acquire_project_operation(project_id, "import_file")
     except project_sessions.ProjectSessionError as exc:
         return json.dumps({"error": str(exc)})
 
@@ -503,14 +503,14 @@ async def import_file(
                             logger.debug(f"Analysis poll error for {program_name}: {exc}")
                         await asyncio.sleep(5)
                 finally:
-                    await state.run_in_worker(project_sessions.release_lease, lease)
+                    await project_sessions.release_project_operation(lease)
 
             asyncio.create_task(_poll_analysis())
 
         return result
     finally:
         if not keep_lease_for_poll:
-            await state.run_in_worker(project_sessions.release_lease, lease)
+            await project_sessions.release_project_operation(lease)
 
 
 
