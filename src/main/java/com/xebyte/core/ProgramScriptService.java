@@ -1823,7 +1823,6 @@ public class ProgramScriptService {
                     return Response.err("Failed to open program from project in headless mode: " + path);
                 }
 
-                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
                 boolean analyzed = false;
                 if (autoAnalyze) {
                     analyzed = runAutoAnalysisAndPersistFlags(program, true);
