@@ -324,3 +324,98 @@ async def test_disabling_busy_worker_is_rejected(fake_workers):
 
     state = worker_control.set_worker_enabled(0, True)
     assert state["enabled"] is True
+
+
+def test_catalog_aggregates_worker_storage_and_routes_to_visible_worker():
+    worker_projects = {
+        "http://127.0.0.1:8089": [PROJECTS[0]],
+        "http://127.0.0.1:8090": [PROJECTS[1]],
+    }
+    worker_state = {
+        "http://127.0.0.1:8089": None,
+        "http://127.0.0.1:8090": None,
+    }
+
+    def do_request(
+        method,
+        endpoint,
+        params=None,
+        json_data=None,
+        timeout=30,
+        connection=None,
+    ):
+        url = connection.active_tcp
+        if endpoint == "/list_projects":
+            return json.dumps(worker_projects[url]), 200
+        if endpoint == "/get_project_info":
+            name = worker_state[url]
+            return json.dumps(
+                {"data": {"has_project": name is not None, "project_name": name or ""}}
+            ), 200
+        if endpoint == "/open_project":
+            path = json_data["path"]
+            visible = {item["path"]: item["name"] for item in worker_projects[url]}
+            if path not in visible:
+                return json.dumps({"data": {"error": f"not visible on {url}"}}), 200
+            worker_state[url] = visible[path]
+            return json.dumps(
+                {"data": {"success": True, "project": worker_state[url]}}
+            ), 200
+        raise AssertionError(f"unexpected request: {method} {endpoint}")
+
+    with patch.object(project_sessions.transport, "do_request", side_effect=do_request):
+        listed = project_sessions.list_projects()
+        by_name = {item["name"]: item for item in listed["projects"]}
+
+        assert set(by_name) == {"alpha", "beta"}
+        assert by_name["alpha"]["available_worker_count"] == 1
+        assert by_name["beta"]["available_worker_count"] == 1
+
+        lease = project_sessions.checkout(by_name["beta"]["project_id"])
+        try:
+            assert lease.worker_url == "http://127.0.0.1:8090"
+            assert worker_state["http://127.0.0.1:8089"] is None
+            assert worker_state["http://127.0.0.1:8090"] == "beta"
+        finally:
+            project_sessions.release_lease(lease)
+
+
+def test_checkout_falls_back_when_one_visible_worker_cannot_open_project():
+    worker_state = {
+        "http://127.0.0.1:8089": None,
+        "http://127.0.0.1:8090": None,
+    }
+
+    def do_request(
+        method,
+        endpoint,
+        params=None,
+        json_data=None,
+        timeout=30,
+        connection=None,
+    ):
+        url = connection.active_tcp
+        if endpoint == "/list_projects":
+            return json.dumps([PROJECTS[0]]), 200
+        if endpoint == "/get_project_info":
+            name = worker_state[url]
+            return json.dumps(
+                {"data": {"has_project": name is not None, "project_name": name or ""}}
+            ), 200
+        if endpoint == "/open_project":
+            if url == "http://127.0.0.1:8089":
+                return json.dumps({"data": {"error": "project storage is stale"}}), 200
+            worker_state[url] = "alpha"
+            return json.dumps(
+                {"data": {"success": True, "project": "alpha"}}
+            ), 200
+        raise AssertionError(f"unexpected request: {method} {endpoint}")
+
+    with patch.object(project_sessions.transport, "do_request", side_effect=do_request):
+        project_id = project_sessions.list_projects()["projects"][0]["project_id"]
+        lease = project_sessions.checkout(project_id)
+        try:
+            assert lease.worker_url == "http://127.0.0.1:8090"
+            assert worker_state["http://127.0.0.1:8090"] == "alpha"
+        finally:
+            project_sessions.release_lease(lease)
