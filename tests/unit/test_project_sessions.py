@@ -159,7 +159,7 @@ def test_release_refuses_to_close_project_with_in_flight_request(fake_workers):
     ids = _ids()
     lease = project_sessions.checkout(ids["alpha"])
     try:
-        with pytest.raises(project_sessions.ProjectBusyError, match="in-flight"):
+        with pytest.raises(project_sessions.ProjectBusyError, match="busy"):
             project_sessions.release_project_session(ids["alpha"])
     finally:
         project_sessions.release_lease(lease)
