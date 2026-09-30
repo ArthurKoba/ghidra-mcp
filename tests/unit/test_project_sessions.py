@@ -197,10 +197,23 @@ async def test_same_project_operations_run_fifo(fake_workers):
             await project_sessions.release_project_operation(lease)
 
     second = asyncio.create_task(run("second"))
-    third = asyncio.create_task(run("third"))
-    await asyncio.sleep(0.05)
+    for _ in range(50):
+        info = project_sessions.session_info(ids["alpha"])
+        if info["queued"] == 1:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("second operation did not enter the FIFO queue")
 
-    info = project_sessions.session_info(ids["alpha"])
+    third = asyncio.create_task(run("third"))
+    for _ in range(50):
+        info = project_sessions.session_info(ids["alpha"])
+        if info["queued"] == 2:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("third operation did not enter the FIFO queue")
+
     assert info["running"] is True
     assert info["current_operation"] == "first"
     assert info["queued"] == 2
