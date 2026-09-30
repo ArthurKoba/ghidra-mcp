@@ -973,6 +973,8 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `open_project` - Activate an isolated worker session for project_id
 - `project_session_info` - Inspect worker/session state for one project_id
 - `release_project_session` - Release an idle project worker session
+- `project_session_settings` - project_session_settings
+- `set_project_idle_timeout` - set_project_idle_timeout
 - `search_tools` - Search the full tool catalog by keyword
 - `set_worker_enabled` - set_worker_enabled
 - `unload_tool_group` - Unregister a tool group's dynamic tools

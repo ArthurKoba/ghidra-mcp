@@ -46,9 +46,12 @@ services:
       GHIDRA_MCP_AUTH_TOKEN: "${GHIDRA_MCP_AUTH_TOKEN}"
       GHIDRA_MCP_TRUSTED_HOSTS: "ghidra"
       GHIDRA_MCP_ALLOWED_HOSTS: "ghidra-mcp,bridge,localhost,127.0.0.1"
+      GHIDRA_MCP_SESSION_SETTINGS_PATH: "/data/bridge/project_session_settings.json"
     depends_on:
       ghidra:
         condition: service_healthy
+    volumes:
+      - ghidra-data:/data
     networks:
       coolify:
         aliases:
