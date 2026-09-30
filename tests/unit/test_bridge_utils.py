@@ -1334,6 +1334,41 @@ class TestToolNameSanitization(unittest.TestCase):
         self.assertEqual(schema[0]["name"], "server_status")
         self.assertEqual(schema[0]["endpoint"], "/server/status")
 
+    def test_parse_schema_coerces_annotation_defaults(self):
+        from bridge_mcp_ghidra import _parse_schema
+
+        parsed = _parse_schema(
+            {
+                "tools": [
+                    {
+                        "path": "/search_functions",
+                        "method": "GET",
+                        "params": [
+                            {"name": "offset", "type": "integer", "default": "0"},
+                            {"name": "limit", "type": "integer", "default": "100"},
+                            {"name": "regex", "type": "boolean", "default": "false"},
+                            {"name": "program", "type": "string", "default": ""},
+                        ],
+                    }
+                ]
+            }
+        )
+        props = parsed[0]["input_schema"]["properties"]
+        self.assertEqual(props["offset"]["default"], 0)
+        self.assertEqual(props["limit"]["default"], 100)
+        self.assertIs(props["regex"]["default"], False)
+        self.assertEqual(props["program"]["default"], "")
+
+        fn = __import__("bridge_mcp_ghidra")._build_tool_function(
+            "/search_functions",
+            "GET",
+            parsed[0]["input_schema"],
+        )
+        sig = inspect.signature(fn)
+        self.assertEqual(sig.parameters["offset"].default, 0)
+        self.assertEqual(sig.parameters["limit"].default, 100)
+        self.assertIs(sig.parameters["regex"].default, False)
+
     def test_parse_schema_suffixes_static_name_collisions(self):
         from bridge_mcp_ghidra import _parse_schema
 

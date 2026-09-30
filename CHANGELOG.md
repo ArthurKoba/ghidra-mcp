@@ -6,6 +6,14 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### MCP schema and rename consistency fixes
+
+- MCP schema defaults now preserve their declared JSON types instead of exposing
+  annotation values such as integer/boolean defaults as strings. This fixes
+  optional-argument validation failures in clients that honor the generated schema.
+- Function rename now flushes program events before returning so immediate
+  list/search/name-based reads observe the new primary function name.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

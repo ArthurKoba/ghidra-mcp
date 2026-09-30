@@ -841,6 +841,9 @@ public class FunctionService {
                         .append(" from '").append(oldName).append("' to '").append(newName).append("'");
                 return null;
             });
+            // Publish symbol/function change events before returning so immediate
+            // list/search/name-based calls observe the new primary name.
+            program.flushEvents();
         } catch (Exception e) {
             resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute rename function on Swing thread", e);

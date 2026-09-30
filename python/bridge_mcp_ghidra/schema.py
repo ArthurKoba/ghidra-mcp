@@ -17,6 +17,29 @@ _TYPE_MAP = {
 }
 
 
+def _coerce_schema_default(type_name: str, value):
+    """Convert annotation-string defaults to their declared JSON types."""
+    if not isinstance(value, str):
+        return value
+    if type_name == "integer":
+        try:
+            return int(value)
+        except ValueError:
+            return value
+    if type_name == "number":
+        try:
+            return float(value)
+        except ValueError:
+            return value
+    if type_name == "boolean":
+        lowered = value.casefold()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return value
+
+
 def _normalize_tool_def_names(schema: list[dict]) -> list[dict]:
     """Normalize and de-duplicate MCP-visible names while keeping HTTP endpoints intact."""
     normalized_schema: list[dict] = []
@@ -66,11 +89,12 @@ def _parse_schema(raw: dict) -> list[dict]:
         properties = {}
         required = []
         for p in params:
-            pdef: dict = {"type": p.get("type", "string")}
+            type_name = p.get("type", "string")
+            pdef: dict = {"type": type_name}
             if p.get("description"):
                 pdef["description"] = p["description"]
             if "default" in p and p["default"] is not None:
-                pdef["default"] = p["default"]
+                pdef["default"] = _coerce_schema_default(type_name, p["default"])
             if p.get("source"):
                 pdef["source"] = p["source"]
             if p.get("param_type"):
