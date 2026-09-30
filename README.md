@@ -737,7 +737,7 @@ Available on the standalone headless server (`GhidraMCPHeadlessServer`).
 - `find_similar_functions` - Find similar functions
 - `search_byte_patterns` - Search for byte patterns
 - `search_data_types` - Search data types
-- `search_functions` - Search functions by name
+- `search_functions` - Search functions by name and/or comment
 - `search_functions_enhanced` - Advanced function search
 - `search_strings` - Search defined strings by a regex/substring pattern
 
