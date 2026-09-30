@@ -4389,7 +4389,7 @@ public class DataTypeService {
             category = "datatype")
     public Response auditGlobalsInFunction(
             @Param(value = "address", paramType = "address",
-                   description = "Address of the function (NOT a global address). Accepts 0x<hex> (default space) or <space>:<hex>.") String addressStr,
+                   description = "Function name or address (NOT a global address).") String addressStr,
             @Param(value = "program", description = "Target program name", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
@@ -4398,13 +4398,11 @@ public class DataTypeService {
         if (addressStr == null || addressStr.isEmpty()) {
             return Response.err("address is required");
         }
-        Address funcAddr = ServiceUtils.parseAddress(program, addressStr);
-        if (funcAddr == null) return Response.err(ServiceUtils.getLastParseError());
-
         Function func = ServiceUtils.resolveFunction(program, addressStr);
         if (func == null) {
-            return Response.err("No function found at " + addressStr);
+            return Response.err("No function found for " + addressStr);
         }
+        Address funcAddr = func.getEntryPoint();
 
         // Walk instructions, gather unique data-reference targets.
         // Skip targets that resolve to other functions (those are call/jump

@@ -14,6 +14,18 @@ Complete version history for the Ghidra MCP Server project.
 - Function rename now flushes program events before returning so immediate
   list/search/name-based reads observe the new primary function name.
 
+### Semantic analysis workflow improvements
+
+- `search_functions` now accepts independent name and comment filters, permits
+  an empty filter to list functions, and returns structured name/address nodes.
+- `analyze_function_complete` now reports strings and global data touched by
+  the function alongside callers/callees and behavior.
+- Bulk `decompile_function(functions=...)` now honors `timeout` per function
+  instead of silently using a fixed 30-second timeout for the whole bulk path.
+- `audit_globals_in_function` accepts a function name as well as an address.
+- Function rename invalidates the analysis name cache immediately after
+  publishing program events.
+
 ### Tool consolidation (breaking) — 272 → 251 tools
 
 Redundant tools were folded into "one-or-many" survivors. **No capability was

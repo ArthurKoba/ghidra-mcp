@@ -152,7 +152,7 @@ public class FunctionService {
      * Decompile a function at the given address.
      * If programName is provided, uses that program instead of the current one.
      */
-    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address) OR MANY (functions=comma-separated names/addresses) to pseudocode. On programs with multiple address spaces, prefix addresses with the space name (mem:1000). Replaces batch_decompile.", category = "function")
+    @McpTool(path = "/decompile_function", description = "Decompile ONE function (address/name) OR MANY (functions=comma-separated names/addresses) to pseudocode. In bulk mode, timeout is applied independently to each function, so one slow function does not consume a shared batch timeout. On programs with multiple address spaces, prefix addresses with the space name (mem:1000).", category = "function")
     public Response decompileFunctionByAddress(
             @Param(value = "address", paramType = "address", defaultValue = "",
                    description = "Function address or name (single mode). 0x<hex> or <space>:<hex>. Omit when using functions=.") String addressStr,
@@ -164,7 +164,11 @@ public class FunctionService {
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
         if (functionsParam != null && !functionsParam.trim().isEmpty()) {
-            return batchDecompileFunctions(functionsParam, programName);
+            if (timeoutSeconds <= 0 || timeoutSeconds > MAX_DECOMPILE_TIMEOUT_SECONDS) {
+                return Response.err("timeout must be between 1 and "
+                        + MAX_DECOMPILE_TIMEOUT_SECONDS + " seconds");
+            }
+            return batchDecompileFunctions(functionsParam, programName, timeoutSeconds);
         }
         if (addressStr == null || addressStr.isEmpty()) return Response.err("Address or function name is required (or pass functions= for bulk)");
         // Checked after the bulk dispatch, not before: batchDecompileFunctions
@@ -326,8 +330,9 @@ public class FunctionService {
      */
     // Bulk helper for decompile_function(functions=...). Merged into decompile_function in 7.0.0.
     public Response batchDecompileFunctions(
-            @Param(value = "functions", description = "Comma-separated function references (names or addresses)") String functionsParam,
-            @Param(value = "program", defaultValue = "") String programName) {
+            String functionsParam,
+            String programName,
+            int timeoutSeconds) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
         if (pe.hasError()) return pe.error();
         Program program = pe.program();
@@ -356,7 +361,8 @@ public class FunctionService {
                 DecompInterface decompiler = null;
                 try {
                     decompiler = ServiceUtils.createConfiguredDecompiler(program);
-                    DecompileResults decompResults = decompiler.decompileFunction(function, 30, null);
+                    DecompileResults decompResults = decompiler.decompileFunction(
+                            function, timeoutSeconds, new ConsoleTaskMonitor());
 
                     if (decompResults != null && decompResults.decompileCompleted()) {
                         String decompCode = decompResults.getDecompiledFunction().getC();
@@ -379,8 +385,12 @@ public class FunctionService {
         }
     }
 
+    public Response batchDecompileFunctions(String functionsParam, String programName) {
+        return batchDecompileFunctions(functionsParam, programName, 30);
+    }
+
     public Response batchDecompileFunctions(String functionsParam) {
-        return batchDecompileFunctions(functionsParam, null);
+        return batchDecompileFunctions(functionsParam, null, 30);
     }
 
     /**
@@ -844,6 +854,7 @@ public class FunctionService {
             // Publish symbol/function change events before returning so immediate
             // list/search/name-based calls observe the new primary name.
             program.flushEvents();
+            AnalysisService.invalidateNameCache(program);
         } catch (Exception e) {
             resultMsg.append("Error: Failed to execute rename on Swing thread: ").append(e.getMessage());
             Msg.error(this, "Failed to execute rename function on Swing thread", e);

@@ -105,6 +105,12 @@ public class AnalysisService {
         return tokenized;
     }
 
+    public static void invalidateNameCache(Program program) {
+        if (program != null) {
+            NAME_CACHE.remove(program);
+        }
+    }
+
     // ========================================================================
     // Function classification utility
     // ========================================================================
@@ -2368,6 +2374,11 @@ public class AnalysisService {
                         data.put("locals", localList);
                     }
 
+                    // Surface data dependencies in the same semantic inspection call.
+                    Map<String, Object> touched = collectTouchedData(program, func);
+                    data.put("strings_touched", touched.get("strings"));
+                    data.put("globals_touched", touched.get("globals"));
+
                     // Include completeness scoring (GitHub #109)
                     if (includeCompleteness) {
                         String addrStr = func.getEntryPoint().toString(false);
@@ -2539,6 +2550,63 @@ public class AnalysisService {
     // ========================================================================
     // Private helper methods
     // ========================================================================
+
+    private static Map<String, Object> collectTouchedData(Program program, Function func) {
+        Listing listing = program.getListing();
+        ReferenceManager refManager = program.getReferenceManager();
+        Map<String, Map<String, Object>> stringsByAddress = new LinkedHashMap<>();
+        Map<String, Map<String, Object>> globalsByAddress = new LinkedHashMap<>();
+
+        InstructionIterator instructions = listing.getInstructions(func.getBody(), true);
+        while (instructions.hasNext()) {
+            Instruction instruction = instructions.next();
+            for (Reference ref : refManager.getReferencesFrom(instruction.getAddress())) {
+                if (ref.getReferenceType().isFlow()
+                        || ref.getReferenceType().isCall()
+                        || ref.getReferenceType().isJump()) {
+                    continue;
+                }
+                Address target = ref.getToAddress();
+                if (target == null || !program.getMemory().contains(target)
+                        || func.getBody().contains(target)) {
+                    continue;
+                }
+                if (program.getFunctionManager().getFunctionAt(target) != null) {
+                    continue;
+                }
+
+                Data data = listing.getDataContaining(target);
+                if (data != null && ServiceUtils.isStringData(data)) {
+                    String address = data.getAddress().toString(false);
+                    Map<String, Object> item = new LinkedHashMap<>();
+                    item.putAll(ServiceUtils.addressToJson(data.getAddress(), program));
+                    Object value = data.getValue();
+                    item.put("value", value != null ? value.toString() : "");
+                    item.put("type", data.getDataType().getName());
+                    stringsByAddress.putIfAbsent(address, item);
+                    continue;
+                }
+
+                String address = target.toString(false);
+                Map<String, Object> item = new LinkedHashMap<>();
+                item.putAll(ServiceUtils.addressToJson(target, program));
+                Symbol primary = program.getSymbolTable().getPrimarySymbol(target);
+                if (primary != null) {
+                    item.put("name", primary.getName());
+                }
+                if (data != null && data.getDataType() != null) {
+                    item.put("type", data.getDataType().getName());
+                }
+                globalsByAddress.putIfAbsent(address, item);
+            }
+        }
+
+        return JsonHelper.mapOf(
+                "strings", new ArrayList<>(stringsByAddress.values()),
+                "globals", new ArrayList<>(globalsByAddress.values())
+        );
+    }
+
 
     /**
      * Calculate structural metrics for a function
