@@ -422,6 +422,11 @@ public class HeadlessProgramProvider implements ProgramProvider {
      * @param projectPath Path to the program within the project (e.g., "/D2Client.dll")
      * @return The loaded Program, or null on failure
      */
+    @Override
+    public Program openProgramFromProject(String projectPath) {
+        return loadProgramFromProject(projectPath);
+    }
+
     public Program loadProgramFromProject(String projectPath) {
         return loadProgramFromProjectDetailed(projectPath).program;
     }
