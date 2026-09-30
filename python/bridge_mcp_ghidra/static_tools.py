@@ -12,6 +12,7 @@ from . import project_sessions
 from . import registry
 from . import state
 from . import transport
+from . import worker_control
 from .config import DEFAULT_TCP_URL, STATIC_TOOL_NAMES, logger
 from .server import Context, mcp
 from .validation import validate_server_url
@@ -105,6 +106,29 @@ async def release_project_session(project_id: str, close_project: bool = True) -
         result = await state.run_in_worker(
             project_sessions.release_project_session,
             project_id,
+            close_project,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def set_worker_enabled(
+    worker_index: int,
+    enabled: bool,
+    close_project: bool = True,
+) -> str:
+    """Enable or disable a worker slot for new project routing.
+
+    Disabling a busy worker is refused. This is maintenance mode, not a JVM kill.
+    """
+
+    try:
+        result = await state.run_in_worker(
+            worker_control.set_worker_enabled,
+            worker_index,
+            enabled,
             close_project,
         )
         return json.dumps(result, indent=2)

@@ -51,6 +51,7 @@ class WorkerSlot:
     running: int = 0
     current_operation: str | None = None
     last_used_at: float = 0.0
+    enabled: bool = True
     error: str | None = None
 
 
@@ -334,6 +335,7 @@ def _slot_status(index: int, slot: WorkerSlot) -> dict[str, Any]:
         "last_used_at": _timestamp(slot.last_used_at),
         "idle_seconds": round(idle_seconds, 3) if idle_seconds is not None else None,
         "idle_timeout_seconds": timeout,
+        "enabled": slot.enabled,
         "auto_release_eligible": bool(
             slot.project_id
             and timeout > 0
@@ -460,7 +462,10 @@ def checkout(project_id: str) -> ProjectLease:
                 (
                     item
                     for item in _slots.values()
-                    if item.project_id is None and item.project_name is None and item.error is None
+                    if item.enabled
+                    and item.project_id is None
+                    and item.project_name is None
+                    and item.error is None
                 ),
                 None,
             )
@@ -670,7 +675,8 @@ def _idle_slot_locked() -> WorkerSlot:
         (
             item
             for item in _slots.values()
-            if item.project_id is None
+            if item.enabled
+            and item.project_id is None
             and item.project_name is None
             and item.in_flight == 0
             and item.error is None

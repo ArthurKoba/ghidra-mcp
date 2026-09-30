@@ -8,6 +8,8 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
+- Worker slots now support maintenance enable/disable control without killing JVM processes; disabled workers are removed from project routing and can optionally release their idle project session first.
+
 - Project-scoped headless workers now expose an explicit FIFO execution queue per active project/session, report queued/running/current-operation/last-used state, and can auto-release idle sessions via `GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS` (default 900 seconds, `0` disables auto-release).
 
 - Headless `/open_program` now opens project-native programs through the provider lifecycle instead of requiring a GUI `PluginTool`/CodeBrowser, so worker sessions can activate programs such as `ap1.bin` directly from the open project.

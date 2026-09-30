@@ -100,6 +100,7 @@ MANAGEMENT_TOOL_NAMES = {
     "delete_project",
     "project_session_info",
     "release_project_session",
+    "set_worker_enabled",
     "list_tool_groups",
     "load_tool_group",
     "unload_tool_group",
