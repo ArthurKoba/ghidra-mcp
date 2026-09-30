@@ -94,6 +94,23 @@ public interface ProgramProvider {
     }
 
     /**
+     * Open an existing program from this provider's active project.
+     *
+     * <p>Headless providers own the DomainObject consumer lifecycle and should
+     * override this method. GUI providers continue to open project programs
+     * through ProgramManager in ProgramScriptService.
+     *
+     * @param path project-relative DomainFile path
+     * @return the opened Program, or null when it could not be opened
+     * @throws UnsupportedOperationException when the provider does not own
+     *         project-program lifecycle
+     */
+    default Program openProgramFromProject(String path) {
+        throw new UnsupportedOperationException(
+            "Opening project programs is not supported by this program provider");
+    }
+
+    /**
      * Import a binary into this provider's active project.
      *
      * <p>The provider owns the imported Program's lifecycle. This matters in

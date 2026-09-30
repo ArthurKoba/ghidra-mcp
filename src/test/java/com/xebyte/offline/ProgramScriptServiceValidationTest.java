@@ -9,6 +9,7 @@ import ghidra.framework.model.DomainFile;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
+import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
 import junit.framework.TestCase;
 
@@ -65,6 +66,32 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         Response r = scripts.listProjectFiles("/");
         assertTrue(r instanceof Response.Err);
         assertTrue(((Response.Err) r).message().contains("No project is currently open"));
+    }
+
+    public void testHeadlessOpenProgramDelegatesToProvider() {
+        ProgramProvider provider = mock(ProgramProvider.class);
+        Project project = mock(Project.class);
+        Program program = mock(Program.class);
+        FunctionManager functions = mock(FunctionManager.class);
+
+        when(provider.getProject()).thenReturn(project);
+        when(provider.openProgramFromProject("/ap1.bin")).thenReturn(program);
+        when(program.getName()).thenReturn("ap1.bin");
+        when(program.getFunctionManager()).thenReturn(functions);
+        when(functions.getFunctionCount()).thenReturn(123);
+
+        ProgramScriptService svc =
+            new ProgramScriptService(provider, new NoopThreadingStrategy());
+        Response r = svc.openProgramFromProject("/ap1.bin", false);
+
+        assertTrue(r instanceof Response.Ok);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) ((Response.Ok) r).data();
+        assertEquals("ap1.bin", data.get("name"));
+        assertEquals("/ap1.bin", data.get("path"));
+        assertEquals(123, data.get("function_count"));
+        verify(provider).openProgramFromProject("/ap1.bin");
+        verify(provider).setCurrentProgram(program);
     }
 
     public void testHeadlessImportDelegatesToProgramProvider() throws Exception {

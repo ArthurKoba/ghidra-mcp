@@ -1812,13 +1812,44 @@ public class ProgramScriptService {
         }
 
         PluginTool tool = getToolFromProvider();
-        if (tool == null) {
-            return Response.err("Opening programs requires GUI mode (PluginTool not available)");
-        }
-
-        ghidra.framework.model.Project project = tool.getProject();
+        ghidra.framework.model.Project project = resolveProject();
         if (project == null) {
             return Response.err("No project is currently open");
+        }
+
+        if (tool == null) {
+            try {
+                Program program = programProvider.openProgramFromProject(path);
+                if (program == null) {
+                    return Response.err("Failed to open program from project in headless mode: " + path);
+                }
+
+                ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
+                boolean analyzed = false;
+                if (autoAnalyze) {
+                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
+                } else {
+                    try {
+                        suppressAnalysisPrompt(program);
+                    } catch (Exception e) {
+                        Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                    }
+                }
+
+                programProvider.setCurrentProgram(program);
+                return Response.ok(JsonHelper.mapOf(
+                    "success", true,
+                    "message", "Program opened successfully",
+                    "name", program.getName(),
+                    "path", path,
+                    "auto_analyzed", analyzed,
+                    "function_count", program.getFunctionManager().getFunctionCount()
+                ));
+            } catch (UnsupportedOperationException e) {
+                return Response.err("Headless program open is not supported by this provider: " + e.getMessage());
+            } catch (Exception e) {
+                return Response.err("Failed to open program: " + describeOpenFailure(e, path));
+            }
         }
 
         ghidra.framework.model.ProjectData projectData = project.getProjectData();
