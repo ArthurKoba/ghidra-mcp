@@ -1658,6 +1658,13 @@ public class HeadlessProgramProvider implements ProgramProvider {
         for (File f : files) {
             if (f.isFile() && f.getName().endsWith(".gpr")) {
                 String name = f.getName().replace(".gpr", "");
+                ProjectLocator locator = new ProjectLocator(f.getParentFile().getAbsolutePath(), name);
+                File storageDir = locator.getProjectDir();
+                if (!storageDir.isDirectory()) {
+                    Msg.warn(this, "Ignoring stale Ghidra project marker without storage directory: "
+                        + f.getAbsolutePath());
+                    continue;
+                }
                 boolean active = project != null && name.equals(project.getName());
                 result.add(new ProjectInfo(name, f.getAbsolutePath(), active));
             } else if (f.isDirectory() && depth < maxDepth) {
