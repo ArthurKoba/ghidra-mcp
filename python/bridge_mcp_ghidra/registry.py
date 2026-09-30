@@ -190,7 +190,7 @@ def _register_tool_def(tool_def: dict) -> bool:
                 }
             )
         try:
-            lease = await state.run_in_worker(project_sessions.checkout, project_id)
+            lease = await project_sessions.acquire_project_operation(project_id, name)
         except project_sessions.ProjectSessionError as exc:
             return json.dumps({"error": str(exc)})
         try:
@@ -200,7 +200,7 @@ def _register_tool_def(tool_def: dict) -> bool:
                 **kwargs,
             )
         finally:
-            await state.run_in_worker(project_sessions.release_lease, lease)
+            await project_sessions.release_project_operation(lease)
 
     description = (
         description
