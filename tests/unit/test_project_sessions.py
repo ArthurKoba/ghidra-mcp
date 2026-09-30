@@ -368,9 +368,6 @@ def test_catalog_aggregates_worker_storage_and_routes_to_visible_worker():
         by_name = {item["name"]: item for item in listed["projects"]}
 
         assert set(by_name) == {"alpha", "beta"}
-        assert by_name["alpha"]["available_worker_count"] == 1
-        assert by_name["beta"]["available_worker_count"] == 1
-
         lease = project_sessions.checkout(by_name["beta"]["project_id"])
         try:
             assert lease.worker_url == "http://127.0.0.1:8090"

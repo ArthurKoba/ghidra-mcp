@@ -260,43 +260,30 @@ def _project_records(value: Any) -> list[ProjectRecord]:
 def _refresh_catalog_locked(search_dir: str = "") -> dict[str, ProjectRecord]:
     global _catalog, _project_workers
     _sync_worker_config_locked()
-    errors: list[str] = []
     records_by_id: dict[str, ProjectRecord] = {}
     workers_by_project: dict[str, set[str]] = {}
-    successful_workers = 0
+    errors: list[str] = []
     params = {"searchDir": search_dir} if search_dir else None
 
     for url in _configured_urls:
         try:
-            value = _request(url, "GET", "/list_projects", params=params, timeout=20)
-            records = _project_records(value)
-            successful_workers += 1
+            records = _project_records(
+                _request(url, "GET", "/list_projects", params=params, timeout=20)
+            )
         except Exception as exc:
             errors.append(f"{url}: {exc}")
             continue
-
         for record in records:
-            existing = records_by_id.get(record.project_id)
-            if existing is not None and existing != record:
-                raise ProjectSessionError(
-                    "Ghidra workers reported conflicting metadata for "
-                    f"{record.project_id}: {existing} != {record}"
-                )
             records_by_id[record.project_id] = record
             workers_by_project.setdefault(record.project_id, set()).add(url)
 
-    if successful_workers == 0:
+    if not workers_by_project and len(errors) == len(_configured_urls):
         raise ProjectSessionError(
             "No healthy Ghidra worker could list projects: " + "; ".join(errors)
         )
-
     _catalog = records_by_id
-    _project_workers = {
-        project_id: frozenset(urls)
-        for project_id, urls in workers_by_project.items()
-    }
+    _project_workers = {key: frozenset(urls) for key, urls in workers_by_project.items()}
     return _catalog
-
 
 def _project_info(url: str) -> dict[str, Any]:
     value = _request(url, "GET", "/get_project_info", timeout=10)
@@ -403,7 +390,6 @@ def list_projects(query: str = "", search_dir: str = "") -> dict[str, Any]:
                     "running": bool(slot.running) if slot else False,
                     "current_operation": slot.current_operation if slot else None,
                     "last_used_at": _timestamp(slot.last_used_at) if slot else None,
-                    "available_worker_count": len(_project_workers.get(record.project_id, ())),
                 }
             )
         return {
@@ -488,8 +474,7 @@ def checkout(project_id: str) -> ProjectLease:
         if slot is None:
             eligible_urls = _project_workers.get(record.project_id, frozenset())
             candidates = [
-                item
-                for item in _slots.values()
+                item for item in _slots.values()
                 if item.url in eligible_urls
                 and item.enabled
                 and item.project_id is None
@@ -498,26 +483,21 @@ def checkout(project_id: str) -> ProjectLease:
             ]
             if not candidates:
                 raise ProjectPoolExhaustedError(
-                    f"No free Ghidra worker that can see project {record.name!r}. "
-                    "Release an eligible project session or fix worker project storage. "
-                    f"Eligible workers: {sorted(eligible_urls)}. "
-                    f"Workers: {_status_locked()}"
+                    "All Ghidra workers are occupied or unavailable for this project. "
+                    f"Eligible workers: {sorted(eligible_urls)}. Workers: {_status_locked()}"
                 )
-
-            open_errors: list[str] = []
-            slot = None
+            errors: list[str] = []
             for candidate in candidates:
                 try:
                     _open_on_slot_locked(candidate, record)
                     slot = candidate
                     break
                 except ProjectSessionError as exc:
-                    open_errors.append(f"{candidate.url}: {exc}")
-
+                    errors.append(f"{candidate.url}: {exc}")
             if slot is None:
                 raise ProjectSessionError(
                     f"No eligible Ghidra worker could open project {record.name!r}: "
-                    + "; ".join(open_errors)
+                    + "; ".join(errors)
                 )
 
         slot.in_flight += 1
@@ -527,7 +507,6 @@ def checkout(project_id: str) -> ProjectLease:
             worker_url=slot.url,
             snapshot=_snapshot(slot.url, record.name),
         )
-
 
 def release_lease(lease: ProjectLease) -> None:
     with _lock:
