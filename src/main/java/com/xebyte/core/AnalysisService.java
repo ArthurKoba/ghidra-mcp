@@ -2657,16 +2657,16 @@ public class AnalysisService {
             Address observedAt,
             Map<String, Map<String, Object>> stringsByAddress,
             Map<String, Map<String, Object>> globalsByAddress) {
-        if (target == null
-                || !program.getMemory().contains(target)
-                || func.getBody().contains(target)
-                || program.getFunctionManager().getFunctionAt(target) != null) {
+        Address resolvedTarget = resolveLoadedAlias(program, target);
+        if (resolvedTarget == null
+                || func.getBody().contains(resolvedTarget)
+                || program.getFunctionManager().getFunctionAt(resolvedTarget) != null) {
             return;
         }
 
         Listing listing = program.getListing();
-        Data data = listing.getDataContaining(target);
-        Symbol primary = program.getSymbolTable().getPrimarySymbol(target);
+        Data data = listing.getDataContaining(resolvedTarget);
+        Symbol primary = program.getSymbolTable().getPrimarySymbol(resolvedTarget);
 
         // Keep this extraction evidence-backed and cheap: an arbitrary numeric
         // constant is not enough. The target must resolve to defined data or a
@@ -2694,12 +2694,12 @@ public class AnalysisService {
             return;
         }
 
-        String key = target.toString(false);
+        String key = resolvedTarget.toString(false);
         Map<String, Object> item = globalsByAddress.computeIfAbsent(
                 key,
                 ignored -> {
                     Map<String, Object> created = new LinkedHashMap<>();
-                    created.putAll(ServiceUtils.addressToJson(target, program));
+                    created.putAll(ServiceUtils.addressToJson(resolvedTarget, program));
                     if (primary != null) {
                         created.put("name", primary.getName());
                     }
@@ -2711,6 +2711,31 @@ public class AnalysisService {
                     return created;
                 });
         appendTouchedEvidence(item, evidence, observedAt);
+    }
+
+    private static Address resolveLoadedAlias(Program program, Address target) {
+        if (target == null) {
+            return null;
+        }
+        Memory memory = program.getMemory();
+        if (memory.contains(target)) {
+            return target;
+        }
+        if (target.getAddressSpace().getSize() == 32) {
+            long offset = target.getUnsignedOffset();
+            long segment = offset & 0xE0000000L;
+            if (segment == 0x80000000L || segment == 0xA0000000L) {
+                try {
+                    Address alias = target.getAddressSpace().getAddress(offset & 0x1FFFFFFFL);
+                    if (memory.contains(alias)) {
+                        return alias;
+                    }
+                } catch (Exception ignored) {
+                    return null;
+                }
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")
