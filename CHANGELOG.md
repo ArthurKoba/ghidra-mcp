@@ -8,6 +8,8 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
+- Project-scoped headless workers now expose an explicit FIFO execution queue per active project/session, report queued/running/current-operation/last-used state, and can auto-release idle sessions via `GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS` (default 900 seconds, `0` disables auto-release).
+
 - Headless `/open_program` now opens project-native programs through the provider lifecycle instead of requiring a GUI `PluginTool`/CodeBrowser, so worker sessions can activate programs such as `ap1.bin` directly from the open project.
 
 - MCP schema defaults now preserve their declared JSON types instead of exposing
