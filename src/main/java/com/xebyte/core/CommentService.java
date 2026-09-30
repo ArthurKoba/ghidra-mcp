@@ -117,7 +117,7 @@ public class CommentService {
      */
     @McpTool(path = "/get_comment", description = "Get listing comments (plate/pre/eol/post/repeatable) by function name or address, including data addresses. All five kinds are always present in the response: null means the kind was never set, \"\" means it was explicitly cleared. Also returns a convenience `comment` (first non-empty) and `has_comment` flag.", category = "comment")
     public Response getComment(
-            @Param(value = "address", paramType = "address",
+            @Param(value = "address",
                    description = "Function name or address. Addresses may identify code or data.") String addressStr,
             @Param(value = "program", description = "Target program name (omit to use the active program)", defaultValue = "") String programName) {
         ServiceUtils.ProgramOrError pe = ServiceUtils.getProgramOrError(programProvider, programName);
