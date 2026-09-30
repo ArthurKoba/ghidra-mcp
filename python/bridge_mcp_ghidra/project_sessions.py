@@ -10,7 +10,7 @@ import posixpath
 import threading
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from . import state, transport
@@ -93,7 +93,7 @@ def _touch(slot: WorkerSlot) -> None:
 def _timestamp(value: float) -> str | None:
     if value <= 0:
         return None
-    return datetime.fromtimestamp(value, UTC).isoformat()
+    return datetime.fromtimestamp(value, timezone.utc).isoformat()
 
 
 def _queue_lock(worker_url: str) -> asyncio.Lock:
