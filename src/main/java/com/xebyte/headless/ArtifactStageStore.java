@@ -264,6 +264,32 @@ public final class ArtifactStageStore {
         return out;
     }
 
+    public synchronized Map<String, Object> deleteFile(String path) throws IOException {
+        if (path == null || path.isBlank()) {
+            throw new IOException("artifact path is required");
+        }
+        Path requested = Path.of(path.trim());
+        Path candidate = requested.isAbsolute()
+            ? requested.normalize()
+            : fileRoot.resolve(requested).normalize();
+        if (!candidate.startsWith(fileRoot)) {
+            throw new IOException("artifact path is outside configured file root");
+        }
+        if (!Files.isRegularFile(candidate)) {
+            throw new IOException("artifact file does not exist");
+        }
+        Path realRoot = fileRoot.toRealPath();
+        Path realFile = candidate.toRealPath();
+        if (!realFile.startsWith(realRoot)) {
+            throw new IOException("artifact path resolves outside configured file root");
+        }
+        Files.delete(realFile);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("path", realFile.toAbsolutePath().toString());
+        out.put("deleted", true);
+        return out;
+    }
+
     public synchronized Map<String, Object> cancel(String stageId) throws IOException {
         Path dir = stageDir(stageId);
         if (!Files.exists(dir)) {
