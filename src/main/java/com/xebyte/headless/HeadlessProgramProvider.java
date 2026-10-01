@@ -209,12 +209,92 @@ public class HeadlessProgramProvider implements ProgramProvider {
     @Override
     public Program importProgram(File file, String projectFolder,
             String languageId, String compilerSpecId) {
-        String normalizedLanguageId = languageId == null ? "" : languageId.trim();
-        if (normalizedLanguageId.isEmpty()) {
-            return loadProgramFromFile(file, projectFolder);
+        return importProgramDetailed(file, projectFolder, languageId, compilerSpecId).program;
+    }
+
+    @Override
+    public ProgramProvider.BinaryImportResult importProgramDetailed(
+            File file, String projectFolder, String languageId, String compilerSpecId) {
+        if (file == null || !file.exists()) {
+            String path = file == null ? "<null>" : file.getAbsolutePath();
+            return ProgramProvider.BinaryImportResult.failure("File not found: " + path, null);
         }
-        return loadProgramFromFileWithLanguage(
-            file, projectFolder, normalizedLanguageId, compilerSpecId);
+        if (project == null) {
+            return ProgramProvider.BinaryImportResult.failure(
+                "No project open. Call /open_project before importing.", null);
+        }
+
+        String folder = normalizeProjectFolder(projectFolder);
+        DomainFolder destination = resolveFolder(folder, true);
+        if (destination == null) {
+            return ProgramProvider.BinaryImportResult.failure(
+                "Could not resolve or create project folder: " + folder, null);
+        }
+
+        String normalizedLanguageId = languageId == null ? "" : languageId.trim();
+        String normalizedCompilerSpecId = compilerSpecId == null ? "" : compilerSpecId.trim();
+
+        Program existing = openExistingByName(file.getName(), destination.getPathname());
+        if (existing != null) {
+            if (!normalizedLanguageId.isEmpty()) {
+                String existingLanguage = existing.getLanguageID() == null
+                    ? "" : existing.getLanguageID().getIdAsString();
+                if (!normalizedLanguageId.equals(existingLanguage)) {
+                    return ProgramProvider.BinaryImportResult.failure(
+                        "Program already exists at " + existing.getDomainFile().getPathname()
+                            + " with language '" + existingLanguage
+                            + "', requested '" + normalizedLanguageId
+                            + "'. Import into a different project folder or remove the conflicting copy.",
+                        null);
+                }
+            }
+            return ProgramProvider.BinaryImportResult.success(existing);
+        }
+
+        MessageLog log = new MessageLog();
+        try {
+            Program program;
+            if (normalizedLanguageId.isEmpty()) {
+                LoadResults<Program> results = AutoImporter.importByUsingBestGuess(
+                    file, project, destination.getPathname(), this, log, monitor);
+                if (results == null) {
+                    return ProgramProvider.BinaryImportResult.failure(
+                        "No load spec matched the input; specify an explicit language for raw binaries",
+                        log.toString());
+                }
+                results.save(monitor);
+                program = results.getPrimaryDomainObject();
+            } else {
+                LanguageService langService = DefaultLanguageService.getLanguageService();
+                Language language = langService.getLanguage(new LanguageID(normalizedLanguageId));
+                CompilerSpec compilerSpec = normalizedCompilerSpecId.isEmpty()
+                    ? language.getDefaultCompilerSpec()
+                    : language.getCompilerSpecByID(new CompilerSpecID(normalizedCompilerSpecId));
+                Loaded<Program> loaded = AutoImporter.importAsBinary(
+                    file, project, destination.getPathname(), language, compilerSpec,
+                    this, log, monitor);
+                if (loaded == null) {
+                    return ProgramProvider.BinaryImportResult.failure(
+                        "Raw importer returned no result for language '" + normalizedLanguageId + "'",
+                        log.toString());
+                }
+                loaded.save(monitor);
+                program = loaded.getDomainObject(this);
+            }
+
+            if (program == null) {
+                return ProgramProvider.BinaryImportResult.failure(
+                    "Importer returned no primary program", log.toString());
+            }
+            registerProgram(program);
+            currentProgram = program;
+            return ProgramProvider.BinaryImportResult.success(program);
+        } catch (Exception e) {
+            String message = "Import failed (" + e.getClass().getSimpleName() + "): "
+                + (e.getMessage() == null ? e.toString() : e.getMessage());
+            Msg.error(this, message + " for " + file.getAbsolutePath(), e);
+            return ProgramProvider.BinaryImportResult.failure(message, log.toString());
+        }
     }
 
     /**
