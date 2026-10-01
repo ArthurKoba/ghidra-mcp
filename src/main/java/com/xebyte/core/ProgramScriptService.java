@@ -321,6 +321,71 @@ public class ProgramScriptService {
         return Response.ok(out);
     }
 
+    /**
+     * Inspect Ghidra's registered language registry without requiring a loaded program.
+     * With an exact language ID, returns a compact presence/description result.
+     */
+    @McpTool(path = "/get_language_registry",
+             description = "Inspect the registered Ghidra language registry, optionally querying one exact Language ID.",
+             category = "program")
+    public Response getLanguageRegistry(
+            @Param(value = "language",
+                   description = "Exact Language ID to query (e.g. 'SunplusSPHEAudioDSP:BE:16:default'); omit to list all registered languages",
+                   defaultValue = "") String languageId,
+            @Param(value = "include_deprecated",
+                   description = "Include deprecated languages when listing the full registry",
+                   defaultValue = "false") boolean includeDeprecated) {
+
+        ghidra.program.model.lang.LanguageService service =
+            ghidra.program.util.DefaultLanguageService.getLanguageService();
+        String normalized = languageId == null ? "" : languageId.trim();
+
+        if (!normalized.isEmpty()) {
+            try {
+                ghidra.program.model.lang.LanguageDescription description =
+                    service.getLanguageDescription(
+                        new ghidra.program.model.lang.LanguageID(normalized));
+                return Response.ok(JsonHelper.mapOf(
+                    "found", true,
+                    "language", languageDescriptionMap(description)));
+            }
+            catch (ghidra.program.model.lang.LanguageNotFoundException e) {
+                return Response.ok(JsonHelper.mapOf(
+                    "found", false,
+                    "language_id", normalized));
+            }
+        }
+
+        List<Map<String, Object>> languages = new ArrayList<>();
+        for (ghidra.program.model.lang.LanguageDescription description :
+                service.getLanguageDescriptions(includeDeprecated)) {
+            languages.add(languageDescriptionMap(description));
+        }
+        languages.sort(Comparator.comparing(
+            entry -> String.valueOf(entry.get("language_id"))));
+
+        return Response.ok(JsonHelper.mapOf(
+            "count", languages.size(),
+            "include_deprecated", includeDeprecated,
+            "languages", languages));
+    }
+
+    private static Map<String, Object> languageDescriptionMap(
+            ghidra.program.model.lang.LanguageDescription description) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("language_id", description.getLanguageID().toString());
+        out.put("processor", description.getProcessor().toString());
+        out.put("endian", String.valueOf(description.getEndian()));
+        out.put("instruction_endian", String.valueOf(description.getInstructionEndian()));
+        out.put("size_bits", description.getSize());
+        out.put("variant", description.getVariant());
+        out.put("version", description.getVersion());
+        out.put("minor_version", description.getMinorVersion());
+        out.put("description", description.getDescription());
+        out.put("deprecated", description.isDeprecated());
+        return out;
+    }
+
     // ========================================================================
     // Program Options (typed key -> value settings grouped by category)
     // ========================================================================
