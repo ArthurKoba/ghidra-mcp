@@ -62,6 +62,20 @@ jobs:
         test -s "$LANG_DIR/sunplus_sphe_audio_dsp.sla"
         test -r "$LANG_DIR/sunplus_sphe_audio_dsp.sla"
 
+    - name: Instantiate Sunplus SPHE audio-DSP language
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        printf '\\x19\\x82\\x0f\\x0a\\x00\\x0f\\x80\\x02\\x3a\\x80\\x02\\x1a' > /tmp/sunplus-sphe-smoke.bin
+        mkdir -p /tmp/sunplus-sphe-smoke-projects
+        "$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-sphe-smoke-projects sunplus-sphe-smoke \
+          -import /tmp/sunplus-sphe-smoke.bin \
+          -loader BinaryLoader \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -cspec default \
+          -noanalysis \
+          -deleteProject
+
     - name: Install Ghidra JARs to Maven local repository
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
