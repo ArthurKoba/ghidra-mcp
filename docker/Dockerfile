@@ -149,9 +149,22 @@ ENV HOME=/home/ghidra
 USER 1000:1000
 
 # Runtime acceptance: the unprivileged worker user must be able to read the
-# precompiled SLEIGH artifact. /opt/ghidra is not writable at runtime, so a
-# missing/unreadable .sla cannot be repaired lazily by the worker.
-RUN test -r /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.sla
+# precompiled SLEIGH artifact and instantiate the language through the same
+# headless import path used in production.
+RUN set -eux; \
+    LANG_DIR=/opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP/data/languages; \
+    test -r "$LANG_DIR/sunplus_sphe_audio_dsp.sla"; \
+    printf '\\x19\\x82\\x0f\\x0a\\x00\\x0f\\x80\\x02\\x3a\\x80\\x02\\x1a' > /tmp/sunplus-sphe-smoke.bin; \
+    mkdir -p /tmp/sunplus-sphe-smoke-projects; \
+    /opt/ghidra/support/analyzeHeadless \
+      /tmp/sunplus-sphe-smoke-projects sunplus-sphe-smoke \
+      -import /tmp/sunplus-sphe-smoke.bin \
+      -loader "Raw Binary" \
+      -processor "SunplusSPHEAudioDSP:BE:16:default" \
+      -cspec default \
+      -noanalysis \
+      -deleteProject; \
+    rm -f /tmp/sunplus-sphe-smoke.bin
 
 # Expose port
 EXPOSE 8089 8090 8091 8092 8093
