@@ -33,7 +33,7 @@ define register offset=0x080 size=2 [
 
 define register offset=0x0c0 size=2 [ PC PCSTACKTOP ];
 
-define token instruction(24)
+define token inst24(24)
     whole24 = (0,23)
     type3   = (21,23)
     dir20   = (20,20)
