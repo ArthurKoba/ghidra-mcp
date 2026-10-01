@@ -130,6 +130,39 @@ public interface ProgramProvider {
     }
 
     /**
+     * Import a binary and retain diagnostics for this specific call.
+     */
+    default BinaryImportResult importProgramDetailed(File file, String projectFolder,
+            String languageId, String compilerSpecId) {
+        Program program = importProgram(file, projectFolder, languageId, compilerSpecId);
+        return program != null
+            ? BinaryImportResult.success(program)
+            : BinaryImportResult.failure("Binary import returned no program", null);
+    }
+
+    final class BinaryImportResult {
+        public final Program program;
+        public final String error;
+        public final String importerLog;
+
+        private BinaryImportResult(Program program, String error, String importerLog) {
+            this.program = program;
+            this.error = error;
+            this.importerLog = importerLog;
+        }
+
+        public boolean success() { return program != null; }
+
+        public static BinaryImportResult success(Program program) {
+            return new BinaryImportResult(program, null, null);
+        }
+
+        public static BinaryImportResult failure(String error, String importerLog) {
+            return new BinaryImportResult(null, error, importerLog);
+        }
+    }
+
+    /**
      * Get a program by name, falling back to current program if name is null or empty.
      *
      * @param name The program name (may be null)

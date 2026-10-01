@@ -105,12 +105,23 @@ public class ProgramScriptServiceValidationTest extends TestCase {
             ProgramScriptService svc =
                 new ProgramScriptService(provider, new NoopThreadingStrategy());
 
+            when(provider.importProgramDetailed(
+                any(File.class),
+                org.mockito.ArgumentMatchers.eq("/firmware"),
+                org.mockito.ArgumentMatchers.eq(""),
+                org.mockito.ArgumentMatchers.eq("")))
+                .thenReturn(ProgramProvider.BinaryImportResult.failure(
+                    "Import failed (IOException): synthetic failure", "synthetic importer log"));
+
             Response r = svc.importFile(
                 input.toFile().getAbsolutePath(), "/firmware", "", "", false);
 
             assertTrue(r instanceof Response.Err);
-            assertTrue(((Response.Err) r).message().contains("Import failed in headless mode"));
-            verify(provider).importProgram(
+            String message = ((Response.Err) r).message();
+            assertTrue(message.contains("Import failed in headless mode"));
+            assertTrue(message.contains("IOException"));
+            assertTrue(message.contains("synthetic importer log"));
+            verify(provider).importProgramDetailed(
                 any(File.class),
                 org.mockito.ArgumentMatchers.eq("/firmware"),
                 org.mockito.ArgumentMatchers.eq(""),

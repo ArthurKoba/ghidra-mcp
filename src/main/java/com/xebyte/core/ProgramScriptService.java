@@ -2024,10 +2024,16 @@ public class ProgramScriptService {
                 // Headless providers own the Program consumer lifecycle. Delegating
                 // the import here avoids manufacturing a GUI PluginTool and ensures
                 // the same provider that retains the Program also releases it later.
-                program = programProvider.importProgram(
-                    file, projectFolder, normalizedLanguageId, normalizedCompilerSpecId);
-                if (program == null) {
-                    return Response.err("Import failed in headless mode for: " + filePath);
+                ProgramProvider.BinaryImportResult importResult =
+                    programProvider.importProgramDetailed(
+                        file, projectFolder, normalizedLanguageId, normalizedCompilerSpecId);
+                program = importResult.program;
+                if (!importResult.success()) {
+                    String message = "Import failed in headless mode: " + importResult.error;
+                    if (importResult.importerLog != null && !importResult.importerLog.isBlank()) {
+                        message += ". Import log: " + importResult.importerLog;
+                    }
+                    return Response.err(message);
                 }
             } else {
                 MessageLog log = new MessageLog();
