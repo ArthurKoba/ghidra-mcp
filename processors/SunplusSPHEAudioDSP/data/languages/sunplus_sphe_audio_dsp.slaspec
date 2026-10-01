@@ -34,21 +34,24 @@ define register offset=0x080 size=2 [
 define register offset=0x0c0 size=2 [ PC PCSTACKTOP ];
 
 define token inst24(24)
+    # SLEIGH token bit positions for a big-endian 24-bit token are mirrored
+    # relative to the conventional ADSP word bit numbering. For a documented
+    # word field [lo..hi], use token positions [23-hi .. 23-lo].
     whole24 = (0,23)
-    type3   = (21,23)
-    dir20   = (20,20)
-    rgp     = (18,19)
-    addr14  = (4,17)
-    reg4    = (0,3)
+    type3   = (0,2)
+    dir20   = (3,3)
+    rgp     = (4,5)
+    addr14  = (6,19)
+    reg4    = (20,23)
 
-    op4     = (20,23)
+    op4     = (0,3)
     imm16   = (4,19)
-    data14  = (4,17)
-    dreg4   = (0,3)
+    data14  = (6,19)
+    dreg4   = (20,23)
 
-    type10  = (19,23)
-    call18  = (18,18)
-    cond4   = (0,3)
+    type10  = (0,4)
+    call18  = (5,5)
+    cond4   = (20,23)
 ;
 
 DReg: AX0 is dreg4=0x0 & AX0 { export AX0; }

@@ -74,6 +74,8 @@ jobs:
           -processor "SunplusSPHEAudioDSP:BE:16:default" \
           -cspec default \
           -noanalysis \
+          -scriptPath "$PWD/ghidra_scripts" \
+          -postScript SunplusDSPDecodeSmoke.java \
           -deleteProject
 
     - name: Install Ghidra JARs to Maven local repository

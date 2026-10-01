@@ -163,6 +163,8 @@ RUN set -eux; \
       -processor "SunplusSPHEAudioDSP:BE:16:default" \
       -cspec default \
       -noanalysis \
+      -scriptPath /app/ghidra_scripts \
+      -postScript SunplusDSPDecodeSmoke.java \
       -deleteProject; \
     rm -f /tmp/sunplus-sphe-smoke.bin
 
