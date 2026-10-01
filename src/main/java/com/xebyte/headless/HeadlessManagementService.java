@@ -133,6 +133,22 @@ public class HeadlessManagementService {
         }
     }
 
+    @McpTool(path = "/artifact_file_read", method = "POST",
+            description = "Read one file under GHIDRA_MCP_FILE_ROOT in bounded base64 chunks. "
+                + "Intended for trusted orchestrators copying exports out of the isolated "
+                + "Ghidra artifact area without exposing project storage.",
+            category = "headless")
+    public Response artifactFileRead(
+            @Param(value = "path", source = ParamSource.BODY) String path,
+            @Param(value = "offset", source = ParamSource.BODY, defaultValue = "0") long offset,
+            @Param(value = "length", source = ParamSource.BODY, defaultValue = "1048576") int length) {
+        try {
+            return Response.ok(requireArtifactStageStore().readFile(path, offset, length));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
     @McpTool(path = "/artifact_stage_cancel", method = "POST",
             description = "Delete one internal artifact stage and all of its temporary bytes.",
             category = "headless")
