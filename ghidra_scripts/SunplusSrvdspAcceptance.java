@@ -11,6 +11,7 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.pcode.PcodeOp;
 
 public class SunplusSrvdspAcceptance extends GhidraScript {
@@ -39,6 +40,16 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
         }
         if (missing != 0) {
             throw new AssertionError("Undefined srvdsp code words: " + missing);
+        }
+
+        AddressSpace dm = currentProgram.getAddressFactory().getAddressSpace("DM");
+        if (dm == null) {
+            throw new AssertionError("DM address space missing");
+        }
+        MemoryBlock dmState = currentProgram.getMemory().getBlock(dm.getAddress(0));
+        if (dmState == null || !"SRVDSP_DM_STATE".equals(dmState.getName()) ||
+                dmState.getSize() < 0x300L) {
+            throw new AssertionError("srvdsp DM backing region missing or too small");
         }
 
         Address loopEndAddress = pm.getAddress(0x186cL * pm.getAddressableUnitSize());
@@ -82,6 +93,11 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
                 Function function = currentProgram.getFunctionManager().getFunctionAt(entry);
                 if (function == null) {
                     throw new AssertionError("Missing seeded function at " + entry);
+                }
+                if (!"void".equals(function.getReturnType().getName())) {
+                    throw new AssertionError(
+                        "Expected void return type at " + entry + ", got " +
+                        function.getReturnType().getName());
                 }
                 functionCount++;
 

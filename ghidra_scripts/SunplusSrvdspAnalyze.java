@@ -9,8 +9,11 @@ import java.util.Set;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.mem.MemoryBlock;
+import ghidra.program.model.symbol.SourceType;
 
 public class SunplusSrvdspAnalyze extends GhidraScript {
     private static final long EXPECTED_BASE = 0x1800L;
@@ -19,11 +22,58 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
     private static final long CODE_LAST = 0x1894L;
     private static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     private static final long EXPECTED_SIZE_BYTES = 1128L;
+    private static final long DM_STATE_SIZE_BYTES = 0x300L;
 
     private AddressSpace pm;
 
     private Address pmWord(long wordAddress) {
         return pm.getAddress(wordAddress * pm.getAddressableUnitSize());
+    }
+
+    private MemoryBlock findCanonicalPmImageBlock() throws Exception {
+        Memory memory = currentProgram.getMemory();
+        for (MemoryBlock block : memory.getBlocks()) {
+            if (!block.isInitialized() || block.getSize() != EXPECTED_SIZE_BYTES ||
+                    !"PM".equals(block.getStart().getAddressSpace().getName())) {
+                continue;
+            }
+            byte[] signature = new byte[3];
+            memory.getBytes(block.getStart(), signature);
+            if ((signature[0] & 0xff) == 0x19 &&
+                    (signature[1] & 0xff) == 0x82 &&
+                    (signature[2] & 0xff) == 0x0f) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    private void ensureDmStateBlock() throws Exception {
+        AddressSpace dm = currentProgram.getAddressFactory().getAddressSpace("DM");
+        if (dm == null) {
+            throw new AssertionError("DM address space is missing");
+        }
+        Memory memory = currentProgram.getMemory();
+        Address start = dm.getAddress(0);
+        if (memory.getBlock(start) != null) {
+            return;
+        }
+        int tx = currentProgram.startTransaction("Create srvdsp DM state backing");
+        boolean commit = false;
+        try {
+            MemoryBlock block = memory.createUninitializedBlock(
+                "SRVDSP_DM_STATE", start, DM_STATE_SIZE_BYTES, false);
+            block.setRead(true);
+            block.setWrite(true);
+            block.setExecute(false);
+            block.setVolatile(false);
+            block.setComment(
+                "Backing data-memory region for srvdsp state used by recovered wrapper actions.");
+            commit = true;
+        }
+        finally {
+            currentProgram.endTransaction(tx, commit);
+        }
     }
 
     private int readWord24(Address address) throws Exception {
@@ -96,16 +146,19 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
         int created = 0;
         for (long target : targets) {
             Address entry = pmWord(target);
-            Function existing = currentProgram.getFunctionManager().getFunctionAt(entry);
-            if (existing != null) {
-                continue;
-            }
-            String name = String.format("srvdsp_handler_%04x", target);
-            Function function = createFunction(entry, name);
+            Function function = currentProgram.getFunctionManager().getFunctionAt(entry);
             if (function == null) {
-                throw new AssertionError("Unable to create function at " + entry);
+                String name = String.format("srvdsp_handler_%04x", target);
+                function = createFunction(entry, name);
+                if (function == null) {
+                    throw new AssertionError("Unable to create function at " + entry);
+                }
+                created++;
             }
-            created++;
+            if (function.getSignatureSource() != SourceType.USER_DEFINED &&
+                    function.getReturnType().getName().startsWith("undefined")) {
+                function.setReturnType(VoidDataType.dataType, SourceType.ANALYSIS);
+            }
         }
         return created;
     }
@@ -120,9 +173,8 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
             throw new AssertionError("Unexpected language: " + currentProgram.getLanguageID());
         }
         Memory memory = currentProgram.getMemory();
-        if (memory.getSize() != EXPECTED_SIZE_BYTES) {
-            throw new AssertionError(
-                "Unexpected srvdsp size: " + memory.getSize() + " bytes");
+        if (findCanonicalPmImageBlock() == null) {
+            throw new AssertionError("Canonical srvdsp PM image/signature not found");
         }
         pm = currentProgram.getAddressFactory().getAddressSpace("PM");
         if (pm == null) {
@@ -130,6 +182,7 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
         }
 
         ensureImageBase();
+        ensureDmStateBlock();
         Set<Long> targets = collectHandlerTargets();
         if (targets.size() != 9) {
             throw new AssertionError("Expected 9 local vector handlers, got " + targets);

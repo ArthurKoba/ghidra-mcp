@@ -8,9 +8,11 @@ import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSpace;
+import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.task.TaskMonitor;
 
@@ -31,6 +33,7 @@ public final class SunplusSrvdspPostProcessor {
     public static final long CODE_LAST = 0x1894L;
     public static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     public static final int EXPECTED_LOCAL_HANDLERS = 9;
+    public static final long DM_STATE_SIZE_BYTES = 0x300L;
 
     private SunplusSrvdspPostProcessor() {
     }
@@ -68,6 +71,10 @@ public final class SunplusSrvdspPostProcessor {
                 changed = true;
             }
 
+            if (ensureDmStateBlock(program)) {
+                changed = true;
+            }
+
             Set<Long> handlers = collectLocalHandlerTargets(program, pm);
             if (handlers.size() != EXPECTED_LOCAL_HANDLERS) {
                 throw new IllegalStateException(
@@ -86,18 +93,26 @@ public final class SunplusSrvdspPostProcessor {
 
             for (long target : handlers) {
                 Address entry = pmWord(pm, target);
-                Function existing = program.getFunctionManager().getFunctionAt(entry);
-                if (existing != null) {
-                    continue;
+                Function function = program.getFunctionManager().getFunctionAt(entry);
+                if (function == null) {
+                    String name = String.format("srvdsp_handler_%04x", target);
+                    CreateFunctionCmd create =
+                        new CreateFunctionCmd(name, entry, null, SourceType.ANALYSIS);
+                    if (!create.applyTo(program, monitor)) {
+                        throw new IllegalStateException(
+                            "Unable to create srvdsp function at " + entry + ": " + create.getStatusMsg());
+                    }
+                    function = program.getFunctionManager().getFunctionAt(entry);
+                    if (function == null) {
+                        throw new IllegalStateException("Created srvdsp action missing at " + entry);
+                    }
+                    changed = true;
                 }
-                String name = String.format("srvdsp_handler_%04x", target);
-                CreateFunctionCmd create =
-                    new CreateFunctionCmd(name, entry, null, SourceType.ANALYSIS);
-                if (!create.applyTo(program, monitor)) {
-                    throw new IllegalStateException(
-                        "Unable to create srvdsp function at " + entry + ": " + create.getStatusMsg());
+                if (function.getSignatureSource() != SourceType.USER_DEFINED &&
+                        function.getReturnType().getName().startsWith("undefined")) {
+                    function.setReturnType(VoidDataType.dataType, SourceType.ANALYSIS);
+                    changed = true;
                 }
-                changed = true;
             }
 
             int missing = countMissingInstructions(program, pm);
@@ -123,19 +138,46 @@ public final class SunplusSrvdspPostProcessor {
         if (program == null || !LANGUAGE_ID.equals(program.getLanguageID().getIdAsString())) {
             return false;
         }
+        return findCanonicalPmImageBlock(program) != null;
+    }
+
+    private static MemoryBlock findCanonicalPmImageBlock(Program program) throws Exception {
         Memory memory = program.getMemory();
-        if (memory.getSize() != EXPECTED_SIZE_BYTES) {
+        for (MemoryBlock block : memory.getBlocks()) {
+            if (!block.isInitialized() || block.getSize() != EXPECTED_SIZE_BYTES ||
+                    !"PM".equals(block.getStart().getAddressSpace().getName())) {
+                continue;
+            }
+            byte[] signature = new byte[3];
+            memory.getBytes(block.getStart(), signature);
+            if ((signature[0] & 0xff) == 0x19 &&
+                    (signature[1] & 0xff) == 0x82 &&
+                    (signature[2] & 0xff) == 0x0f) {
+                return block;
+            }
+        }
+        return null;
+    }
+
+    private static boolean ensureDmStateBlock(Program program) throws Exception {
+        AddressSpace dm = program.getAddressFactory().getAddressSpace("DM");
+        if (dm == null) {
+            throw new IllegalStateException("Sunplus srvdsp language has no DM address space");
+        }
+        Memory memory = program.getMemory();
+        Address start = dm.getAddress(0);
+        if (memory.getBlock(start) != null) {
             return false;
         }
-        Address min = memory.getMinAddress();
-        if (min == null) {
-            return false;
-        }
-        byte[] signature = new byte[3];
-        memory.getBytes(min, signature);
-        return (signature[0] & 0xff) == 0x19 &&
-            (signature[1] & 0xff) == 0x82 &&
-            (signature[2] & 0xff) == 0x0f;
+        MemoryBlock block = memory.createUninitializedBlock(
+            "SRVDSP_DM_STATE", start, DM_STATE_SIZE_BYTES, false);
+        block.setRead(true);
+        block.setWrite(true);
+        block.setExecute(false);
+        block.setVolatile(false);
+        block.setComment(
+            "Backing data-memory region for srvdsp state used by recovered wrapper actions.");
+        return true;
     }
 
     static Set<Long> collectLocalHandlerTargets(Program program, AddressSpace pm) throws Exception {

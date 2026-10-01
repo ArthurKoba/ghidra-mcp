@@ -90,3 +90,19 @@ def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     assert "PcodeOp.INT_SUB" in accept
     assert "PcodeOp.CBRANCH" in accept
     assert 'contains("dsp_do_until")' in accept
+
+
+def test_srvdsp_analysis_scaffold_materializes_dm_and_void_actions() -> None:
+    post = POST.read_text()
+    analyze = ANALYZE.read_text()
+    accept = ACCEPT.read_text()
+    for text in (post, analyze):
+        assert "SRVDSP_DM_STATE" in text
+        assert "DM_STATE_SIZE_BYTES" in text
+        assert "createUninitializedBlock" in text
+        assert "VoidDataType.dataType" in text
+        assert "getSignatureSource() != SourceType.USER_DEFINED" in text
+    assert "findCanonicalPmImageBlock" in post
+    assert "memory.getSize() != EXPECTED_SIZE_BYTES" not in post
+    assert '"SRVDSP_DM_STATE".equals(dmState.getName())' in accept
+    assert '!"void".equals(function.getReturnType().getName())' in accept
