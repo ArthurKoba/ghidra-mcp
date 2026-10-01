@@ -8,6 +8,8 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
+- Added a shared `get_language_registry` read-only endpoint so headless/GUI clients can verify installed custom processor Language IDs without loading a program or executing diagnostic scripts.
+
 - Project-session registry now aggregates project visibility across all headless workers and routes a project only to workers that actually expose its storage. Stale `.gpr` markers without the matching project storage directory are no longer advertised as available projects.
 
 - Worker slots now support maintenance enable/disable control without killing JVM processes; disabled workers are removed from project routing and can optionally release their idle project session first.
