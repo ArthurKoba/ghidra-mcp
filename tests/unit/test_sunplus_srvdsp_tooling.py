@@ -106,3 +106,18 @@ def test_srvdsp_analysis_scaffold_materializes_dm_and_void_actions() -> None:
     assert "memory.getSize() != EXPECTED_SIZE_BYTES" not in post
     assert '"SRVDSP_DM_STATE".equals(dmState.getName())' in accept
     assert '!"void".equals(function.getReturnType().getName())' in accept
+
+
+def test_srvdsp_processor_model_revision_refresh_is_bounded() -> None:
+    post = POST.read_text()
+    analyze = ANALYZE.read_text()
+    accept = ACCEPT.read_text()
+    for text in (post, analyze):
+        assert "ANALYSIS_MODEL_VERSION = 2" in text
+        assert 'MODEL_VERSION_OPTION = "srvdsp.analysis_model_version"' in text
+        assert "MODEL_REFRESH_FIRST = 0x186bL" in text
+        assert "MODEL_REFRESH_LAST = 0x186cL" in text
+        assert "clearCodeUnits(start, end, false)" in text
+        assert "options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION)" in text
+    assert 'getOptions("Sunplus SPHE Audio DSP")' in accept
+    assert 'getInt("srvdsp.analysis_model_version", 0)' in accept

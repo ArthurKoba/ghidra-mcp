@@ -10,11 +10,13 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Listing;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.util.task.TaskMonitor;
+import ghidra.framework.options.Options;
 
 /**
  * Target-specific pre-analysis preparation for the recovered {@code srvdsp.bin} image.
@@ -34,6 +36,11 @@ public final class SunplusSrvdspPostProcessor {
     public static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     public static final int EXPECTED_LOCAL_HANDLERS = 9;
     public static final long DM_STATE_SIZE_BYTES = 0x300L;
+    public static final int ANALYSIS_MODEL_VERSION = 2;
+    private static final String ANALYSIS_OPTIONS = "Sunplus SPHE Audio DSP";
+    private static final String MODEL_VERSION_OPTION = "srvdsp.analysis_model_version";
+    private static final long MODEL_REFRESH_FIRST = 0x186bL;
+    private static final long MODEL_REFRESH_LAST = 0x186cL;
 
     private SunplusSrvdspPostProcessor() {
     }
@@ -90,6 +97,10 @@ public final class SunplusSrvdspPostProcessor {
                     "Sunplus srvdsp disassembly failed: " + disassemble.getStatusMsg());
             }
             changed = true;
+
+            if (ensureInstructionModelRevision(program, pm, monitor)) {
+                changed = true;
+            }
 
             for (long target : handlers) {
                 Address entry = pmWord(pm, target);
@@ -157,6 +168,34 @@ public final class SunplusSrvdspPostProcessor {
             }
         }
         return null;
+    }
+
+    private static boolean ensureInstructionModelRevision(
+            Program program, AddressSpace pm, TaskMonitor monitor) throws Exception {
+        Options options = program.getOptions(ANALYSIS_OPTIONS);
+        int storedVersion = options.getInt(MODEL_VERSION_OPTION, 0);
+        if (storedVersion >= ANALYSIS_MODEL_VERSION) {
+            return false;
+        }
+
+        Address start = pmWord(pm, MODEL_REFRESH_FIRST);
+        Address lastStart = pmWord(pm, MODEL_REFRESH_LAST);
+        Address end = lastStart.add(pm.getAddressableUnitSize() - 1L);
+        Listing listing = program.getListing();
+        listing.clearCodeUnits(start, end, false);
+
+        DisassembleCommand refresh =
+            new DisassembleCommand(new AddressSet(start, end), null, true);
+        if (!refresh.applyTo(program, monitor)) {
+            throw new IllegalStateException(
+                "Sunplus srvdsp model-refresh disassembly failed: " + refresh.getStatusMsg());
+        }
+        if (listing.getInstructionAt(start) == null || listing.getInstructionAt(lastStart) == null) {
+            throw new IllegalStateException(
+                "Sunplus srvdsp model-refresh did not recreate PM:186B..186C");
+        }
+        options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION);
+        return true;
     }
 
     private static boolean ensureDmStateBlock(Program program) throws Exception {
