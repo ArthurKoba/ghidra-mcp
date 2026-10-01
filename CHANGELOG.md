@@ -8,7 +8,7 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
-- Headless artifact transfer now supports bounded `artifact_file_read` chunks under `GHIDRA_MCP_FILE_ROOT`, allowing trusted orchestrators to copy exported GZF/GAR artifacts out without mounting or exposing project storage.
+- Headless artifact transfer now supports bounded `artifact_file_read` chunks plus constrained `artifact_file_delete` cleanup under `GHIDRA_MCP_FILE_ROOT`, allowing trusted orchestrators to copy exported GZF/GAR artifacts out without mounting or exposing project storage.
 
 - Sunplus SPHE audio-DSP packaging now compiles the `.slaspec` to an explicit co-located `.sla`, verifies it in both builder and final runtime stages, and aligns CI with the Docker runtime's Ghidra 12.1.3. This prevents a registered language definition from surviving into an image without a loadable SLEIGH artifact.
 
