@@ -143,7 +143,7 @@ ENV HOME=/home/ghidra
 USER 1000:1000
 
 # Expose port
-EXPOSE 8089 8090 8091 8092
+EXPOSE 8089 8090 8091 8092 8093
 
 # Volume for persistent data and projects
 VOLUME ["/data", "/projects", "/artifacts"]

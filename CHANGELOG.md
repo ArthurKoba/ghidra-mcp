@@ -8,6 +8,11 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
+- Headless project-session guidance now distinguishes persistent project state from session-local open-program handles. A `Program not found` result after idle release is treated as a reopen condition, not evidence that project analysis was lost.
+- The Docker worker pool is expanded from 2 to 5 workers. Per-worker heap is reduced to 1500 MiB and the container budget is raised to 10 GiB so added concurrency does not simply overcommit the previous 6 GiB limit.
+- Program-resolution errors now tell project-scoped callers to reopen the saved project program before treating it as missing.
+
+
 - Project-session registry now aggregates project visibility across all headless workers and routes a project only to workers that actually expose its storage. Stale `.gpr` markers without the matching project storage directory are no longer advertised as available projects.
 
 - Worker slots now support maintenance enable/disable control without killing JVM processes; disabled workers are removed from project routing and can optionally release their idle project session first.
