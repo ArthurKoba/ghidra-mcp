@@ -159,7 +159,7 @@ RUN set -eux; \
     /opt/ghidra/support/analyzeHeadless \
       /tmp/sunplus-sphe-smoke-projects sunplus-sphe-smoke \
       -import /tmp/sunplus-sphe-smoke.bin \
-      -loader "Raw Binary" \
+      -loader BinaryLoader \
       -processor "SunplusSPHEAudioDSP:BE:16:default" \
       -cspec default \
       -noanalysis \
