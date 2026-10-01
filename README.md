@@ -640,8 +640,8 @@ python -m tools.setup install-ghidra-deps --ghidra-path "C:\ghidra_12.1.2_PUBLIC
 - `exit_ghidra` - Save and exit Ghidra
 - `get_address_spaces` - List all physical and overlay address spaces in the program (overlays include is_overlay flag and overlayed_space name)
 - `get_current_program_info` - Get current program info
-- `get_language_registry` - Inspect the registered Ghidra language registry, optionally querying one exact Language ID
 - `get_language_metadata` - Dump the program's language description: address spaces, registers, default symbols, endianness, pointer size (issue #192)
+- `get_language_registry` - Inspect the registered Ghidra language registry, optionally querying one exact Language ID
 - `get_program_options` - Read all options in a program option group with types, current values, defaults, and descriptions
 - `get_property` - Read the value stored at an address in a property map
 - `import_file` - Import a binary file from disk into the current Ghidra project and open it
