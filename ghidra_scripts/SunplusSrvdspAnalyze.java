@@ -11,9 +11,11 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Listing;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.SourceType;
+import ghidra.framework.options.Options;
 
 public class SunplusSrvdspAnalyze extends GhidraScript {
     private static final long EXPECTED_BASE = 0x1800L;
@@ -23,6 +25,11 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
     private static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     private static final long EXPECTED_SIZE_BYTES = 1128L;
     private static final long DM_STATE_SIZE_BYTES = 0x300L;
+    private static final int ANALYSIS_MODEL_VERSION = 2;
+    private static final String ANALYSIS_OPTIONS = "Sunplus SPHE Audio DSP";
+    private static final String MODEL_VERSION_OPTION = "srvdsp.analysis_model_version";
+    private static final long MODEL_REFRESH_FIRST = 0x186bL;
+    private static final long MODEL_REFRESH_LAST = 0x186cL;
 
     private AddressSpace pm;
 
@@ -131,6 +138,40 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
         return targets;
     }
 
+    private void ensureInstructionModelRevision() throws Exception {
+        Options options = currentProgram.getOptions(ANALYSIS_OPTIONS);
+        int storedVersion = options.getInt(MODEL_VERSION_OPTION, 0);
+        if (storedVersion >= ANALYSIS_MODEL_VERSION) {
+            return;
+        }
+
+        Address start = pmWord(MODEL_REFRESH_FIRST);
+        Address lastStart = pmWord(MODEL_REFRESH_LAST);
+        Address end = lastStart.add(pm.getAddressableUnitSize() - 1L);
+        Listing listing = currentProgram.getListing();
+        int tx = currentProgram.startTransaction("Refresh srvdsp processor model");
+        boolean commit = false;
+        try {
+            listing.clearCodeUnits(start, end, false);
+            for (long off = MODEL_REFRESH_FIRST; off <= MODEL_REFRESH_LAST; off++) {
+                Address address = pmWord(off);
+                if (!disassemble(address)) {
+                    throw new AssertionError(
+                        "Unable to refresh srvdsp instruction model at " + address);
+                }
+            }
+            if (listing.getInstructionAt(start) == null || listing.getInstructionAt(lastStart) == null) {
+                throw new AssertionError(
+                    "srvdsp model refresh did not recreate PM:186B..186C");
+            }
+            options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION);
+            commit = true;
+        }
+        finally {
+            currentProgram.endTransaction(tx, commit);
+        }
+    }
+
     private void disassembleRecoveredCode() throws Exception {
         for (long off = EXPECTED_BASE; off <= CODE_LAST; off++) {
             Address address = pmWord(off);
@@ -188,6 +229,7 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
             throw new AssertionError("Expected 9 local vector handlers, got " + targets);
         }
         disassembleRecoveredCode();
+        ensureInstructionModelRevision();
         int created = seedFunctions(targets);
         analyzeAll(currentProgram);
 

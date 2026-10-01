@@ -7,6 +7,7 @@ import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.app.script.GhidraScript;
+import ghidra.framework.options.Options;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Function;
@@ -40,6 +41,13 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
         }
         if (missing != 0) {
             throw new AssertionError("Undefined srvdsp code words: " + missing);
+        }
+
+        Options srvdspOptions = currentProgram.getOptions("Sunplus SPHE Audio DSP");
+        int modelVersion = srvdspOptions.getInt("srvdsp.analysis_model_version", 0);
+        if (modelVersion < 2) {
+            throw new AssertionError(
+                "srvdsp analysis model revision not applied: " + modelVersion);
         }
 
         AddressSpace dm = currentProgram.getAddressFactory().getAddressSpace("DM");
