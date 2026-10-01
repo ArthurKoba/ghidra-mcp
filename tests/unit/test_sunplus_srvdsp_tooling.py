@@ -76,3 +76,17 @@ def test_decode_smoke_normalizes_word_addressed_flow_targets() -> None:
     assert "getAddressableUnitSize()" in smoke
     assert "targetWordAddress" in smoke
     assert "wordAddress * pm.getAddressableUnitSize()" in smoke
+
+
+def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
+    text = SLASPEC.read_text()
+    accept = ACCEPT.read_text()
+    assert "define context DSPCTX" in text
+    assert "srvdsp_ce_loop_end=(0,0) noflow" in text
+    assert "globalset(LoopAddr, srvdsp_ce_loop_end)" in text
+    assert "CNTR = CNTR - 1" in text
+    assert "if (CNTR != 0) goto inst_start" in text
+    assert "dsp_do_until" not in text
+    assert "PcodeOp.INT_SUB" in accept
+    assert "PcodeOp.CBRANCH" in accept
+    assert 'contains("dsp_do_until")' in accept

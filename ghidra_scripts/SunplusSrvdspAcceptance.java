@@ -10,6 +10,8 @@ import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.listing.Instruction;
+import ghidra.program.model.pcode.PcodeOp;
 
 public class SunplusSrvdspAcceptance extends GhidraScript {
     private static final long CODE_FIRST = 0x1820L;
@@ -37,6 +39,28 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
         }
         if (missing != 0) {
             throw new AssertionError("Undefined srvdsp code words: " + missing);
+        }
+
+        Address loopEndAddress = pm.getAddress(0x186cL * pm.getAddressableUnitSize());
+        Instruction loopEnd = currentProgram.getListing().getInstructionAt(loopEndAddress);
+        if (loopEnd == null) {
+            throw new AssertionError("Missing srvdsp CE loop-end instruction at " + loopEndAddress);
+        }
+        boolean sawCounterSubtract = false;
+        boolean sawConditionalBackEdge = false;
+        for (PcodeOp op : loopEnd.getPcode()) {
+            if (op.getOpcode() == PcodeOp.INT_SUB) {
+                sawCounterSubtract = true;
+            }
+            if (op.getOpcode() == PcodeOp.CBRANCH) {
+                sawConditionalBackEdge = true;
+            }
+        }
+        if (!sawCounterSubtract || !sawConditionalBackEdge) {
+            throw new AssertionError(
+                "srvdsp CE loop P-code incomplete at " + loopEndAddress +
+                ": subtract=" + sawCounterSubtract +
+                " conditional_back_edge=" + sawConditionalBackEdge);
         }
 
         DecompInterface decompiler = new DecompInterface();
@@ -69,6 +93,10 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
                 DecompiledFunction c = results.getDecompiledFunction();
                 if (c == null || c.getC() == null || c.getC().isBlank()) {
                     throw new AssertionError("No C output for " + entry);
+                }
+                if (off == 0x1867L && c.getC().contains("dsp_do_until")) {
+                    throw new AssertionError(
+                        "srvdsp CE loop remained opaque in high-level output at " + entry);
                 }
                 decompiledCount++;
                 println("DECOMPILED " + entry + " " + function.getName());

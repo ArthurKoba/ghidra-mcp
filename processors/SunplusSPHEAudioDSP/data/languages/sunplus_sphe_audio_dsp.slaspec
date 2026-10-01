@@ -38,6 +38,12 @@ define register offset=0x0c0 size=2 [ PC PCSTACKTOP SP ];
 # directly write ASTAT, so keeping the predicates explicit produces stable
 # P-code while ASTAT remains available as the architectural register.
 define register offset=0x0d0 size=1 [ AZF ANF AVF ACF MVF CEF ];
+# Decoder-only context used for the proven srvdsp single-instruction
+# DO ... UNTIL CE loop. This is not an architectural DSP register.
+define register offset=0x0e0 size=4 [ DSPCTX ];
+define context DSPCTX
+    srvdsp_ce_loop_end=(0,0) noflow
+;
 
 define token inst24(24) endian = big
     whole24 = (0,23)
@@ -100,8 +106,6 @@ define token inst24(24) endian = big
     ioaddr  = (4,14)
     iodreg  = (0,3)
 ;
-
-define pcodeop dsp_do_until;
 
 DReg: AX0 is dreg4=0x0 & AX0 { export AX0; }
 DReg: AX1 is dreg4=0x1 & AX1 { export AX1; }
@@ -321,10 +325,22 @@ macro alu_flags_logic(r) {
 
 # -----------------------------------------------------------------------------
 # Type 4: ALU/MAC with DM read/write.
-# srvdsp uses the no-compute DM-write form at PM:186c.
+# srvdsp uses the no-compute DM-write form at PM:186c. The proven DO ...
+# UNTIL CE sequence is a single-instruction hardware loop; the DO constructor
+# marks that loop-end instruction in decode context so its P-code can expose
+# the real CNTR-controlled back edge to the behavior engine.
 # -----------------------------------------------------------------------------
 
-:DMWRITE DagI, DagM, DReg4 is type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
+:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=1 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
+{
+    local dmaddr:2 = DagI;
+    *[DM]:2 dmaddr = DReg4;
+    DagI = DagI + DagM;
+    CNTR = CNTR - 1;
+    if (CNTR != 0) goto inst_start;
+}
+
+:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=0 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
 {
     local dmaddr:2 = DagI;
     *[DM]:2 dmaddr = DReg4;
@@ -544,14 +560,20 @@ macro resident_tail(target) {
 }
 
 # -----------------------------------------------------------------------------
-# Type 11 zero-overhead loop setup.  The loop-end flow is hardware-managed;
-# retain the setup as a userop until a loop-context analyzer injects the back
-# edge.  Fallthrough remains correct for function discovery.
+# Type 11 zero-overhead loop setup.
+#
+# The canonical srvdsp corpus contains one proven CE loop:
+#   DO PM:186C UNTIL CE
+# followed by the single loop-body/end instruction at PM:186C. Mark that
+# instruction with decode context. Its specialized DMWRITE constructor above
+# emits the CNTR decrement/back-edge, allowing the behavior engine to recover
+# a real loop instead of an opaque userop. Other DO targets intentionally stay
+# unsupported until observed in corpus.
 # -----------------------------------------------------------------------------
 
-:"DO" LoopAddr "UNTIL CE" is type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is type11=5 & loop14=0x186c & term4=14 & LoopAddr
+    [ srvdsp_ce_loop_end=1; globalset(LoopAddr, srvdsp_ce_loop_end); ]
 {
-    dsp_do_until(LoopAddr, CNTR);
 }
 
 # -----------------------------------------------------------------------------
