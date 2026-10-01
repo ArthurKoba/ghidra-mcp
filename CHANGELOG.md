@@ -8,6 +8,9 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
+- Sunplus SPHE audio-DSP packaging now compiles the `.slaspec` to an explicit co-located `.sla`, verifies it in both builder and final runtime stages, and aligns CI with the Docker runtime's Ghidra 12.1.3. This prevents a registered language definition from surviving into an image without a loadable SLEIGH artifact.
+
+
 - Headless project-session guidance now distinguishes persistent project state from session-local open-program handles. A `Program not found` result after idle release is treated as a reopen condition, not evidence that project analysis was lost.
 - The Docker worker pool is expanded from 2 to 5 workers. Per-worker heap is reduced to 1500 MiB and the container budget is raised to 10 GiB so added concurrency does not simply overcommit the previous 6 GiB limit.
 - Program-resolution errors now tell project-scoped callers to reopen the saved project program before treating it as missing.
