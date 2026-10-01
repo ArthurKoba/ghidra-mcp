@@ -133,6 +133,19 @@ public class HeadlessManagementService {
         }
     }
 
+    @McpTool(path = "/artifact_file_delete", method = "POST",
+            description = "Delete one file under GHIDRA_MCP_FILE_ROOT after a trusted "
+                + "orchestrator has copied it out. Project storage is outside this root.",
+            category = "headless")
+    public Response artifactFileDelete(
+            @Param(value = "path", source = ParamSource.BODY) String path) {
+        try {
+            return Response.ok(requireArtifactStageStore().deleteFile(path));
+        } catch (Exception e) {
+            return Response.err(e.getMessage());
+        }
+    }
+
     @McpTool(path = "/artifact_file_read", method = "POST",
             description = "Read one file under GHIDRA_MCP_FILE_ROOT in bounded base64 chunks. "
                 + "Intended for trusted orchestrators copying exports out of the isolated "
