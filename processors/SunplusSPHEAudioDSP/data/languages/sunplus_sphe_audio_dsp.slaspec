@@ -132,12 +132,14 @@ JumpAddr: addr14 is addr14 { export *[PM]:2 addr14; }
 
 :DMREAD RegSel, addr14 is type3=4 & dir20=0 & RegSel & addr14
 {
-    RegSel = *[DM]:2 addr14;
+    dmaddr:2 = zext(addr14);
+    RegSel = *[DM]:2 dmaddr;
 }
 
 :DMWRITE addr14, RegSel is type3=4 & dir20=1 & RegSel & addr14
 {
-    *[DM]:2 addr14 = RegSel;
+    dmaddr:2 = zext(addr14);
+    *[DM]:2 dmaddr = RegSel;
 }
 
 :LDI DReg, imm16 is op4=4 & DReg & imm16
