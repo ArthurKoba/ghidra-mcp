@@ -74,6 +74,50 @@ public class ArtifactStageStoreTest extends TestCase {
         }
     }
 
+    public void testBoundedArtifactReadStaysInsideFileRoot() throws Exception {
+        Path root = Files.createTempDirectory("artifact-read-test");
+        ArtifactStageStore store = new ArtifactStageStore(root, 1024 * 1024, 64 * 1024);
+        Path exports = Files.createDirectories(root.resolve("exports"));
+        byte[] payload = "0123456789".getBytes(StandardCharsets.UTF_8);
+        Path file = exports.resolve("sample.bin");
+        Files.write(file, payload);
+
+        Map<String, Object> first = store.readFile(file.toString(), 0, 4);
+        assertEquals(4L, ((Number) first.get("bytes_read")).longValue());
+        assertEquals(4L, ((Number) first.get("next_offset")).longValue());
+        assertEquals(Boolean.FALSE, first.get("eof"));
+        assertEquals("0123", new String(
+            Base64.getDecoder().decode((String) first.get("data_base64")),
+            StandardCharsets.UTF_8));
+
+        Map<String, Object> second = store.readFile("exports/sample.bin", 4, 64);
+        assertEquals(6L, ((Number) second.get("bytes_read")).longValue());
+        assertEquals(10L, ((Number) second.get("next_offset")).longValue());
+        assertEquals(Boolean.TRUE, second.get("eof"));
+        assertEquals("456789", new String(
+            Base64.getDecoder().decode((String) second.get("data_base64")),
+            StandardCharsets.UTF_8));
+
+        Map<String, Object> deleted = store.deleteFile(file.toString());
+        assertEquals(Boolean.TRUE, deleted.get("deleted"));
+        assertFalse(Files.exists(file));
+
+        Path outside = Files.createTempFile("artifact-read-outside", ".bin");
+        Files.writeString(outside, "secret");
+        try {
+            store.readFile(outside.toString(), 0, 6);
+            fail("outside path should fail");
+        } catch (java.io.IOException expected) {
+            assertTrue(expected.getMessage().contains("outside configured file root"));
+        }
+        try {
+            store.deleteFile(outside.toString());
+            fail("outside delete should fail");
+        } catch (java.io.IOException expected) {
+            assertTrue(expected.getMessage().contains("outside configured file root"));
+        }
+    }
+
     private static String sha256(byte[] payload) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         StringBuilder out = new StringBuilder();

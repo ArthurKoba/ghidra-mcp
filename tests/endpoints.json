@@ -1,7 +1,7 @@
 {
   "version": "7.0.0",
   "description": "GhidraMCP REST API Endpoint Specification",
-  "total_endpoints": 258,
+  "total_endpoints": 260,
   "categories": {
     "listing": "List program data",
     "getter": "Get specific data",
@@ -258,6 +258,26 @@
         "output_name"
       ],
       "description": "Archive the currently open project to a Ghidra-native .gar file. The result can be restored into any Ghidra GUI via File â†’ Restore Project, or back into a headless instance via /restore_project. Captures the entire project (all programs, folders, settings, version-control metadata) â€” unlike /export_program which ships a single program as .gzf. Output is written to `output_dir/output_name` (defaults: /data/exports and `<project>.gar`). Refuses to overwrite an existing file. Callers should /save_all_programs first to flush pending in-memory edits."
+    },
+    {
+      "path": "/artifact_file_delete",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "path"
+      ],
+      "description": "Delete one file under GHIDRA_MCP_FILE_ROOT after a trusted orchestrator has copied it out. Project storage is outside this root."
+    },
+    {
+      "path": "/artifact_file_read",
+      "method": "POST",
+      "category": "headless",
+      "params": [
+        "path",
+        "offset",
+        "length"
+      ],
+      "description": "Read one file under GHIDRA_MCP_FILE_ROOT in bounded base64 chunks. Intended for trusted orchestrators copying exports out of the isolated Ghidra artifact area without exposing project storage."
     },
     {
       "path": "/artifact_stage_begin",

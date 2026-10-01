@@ -20,16 +20,16 @@ import java.util.UUID;
 /**
  * Internal staging area for artifacts pushed by the orchestrator/bridge.
  *
- * <p>The public workflow stays artifact-id based. The bridge transfers bytes
- * into this private area, verifies size/SHA-256, imports the staged file, then
- * deletes the stage. No shared filesystem identity is required between the
- * bridge and the Ghidra container.</p>
+ * <p>The bridge transfers bytes through this private boundary without exposing
+ * Ghidra project storage. Inbound files use chunked staging; exported files can
+ * be read back in bounded chunks from the configured file root.</p>
  */
 public final class ArtifactStageStore {
 
     private static final long DEFAULT_MAX_BYTES = 8L * 1024 * 1024 * 1024;
     private static final int DEFAULT_CHUNK_BYTES = 1024 * 1024;
 
+    private final Path fileRoot;
     private final Path root;
     private final long maxBytes;
     private final int chunkBytes;
@@ -49,8 +49,9 @@ public final class ArtifactStageStore {
         if (chunkBytes < 64 * 1024 || chunkBytes > 8 * 1024 * 1024) {
             throw new IOException("artifact staging chunk size must be between 64 KiB and 8 MiB");
         }
-        this.root = fileRoot.resolve(".koba-stage").normalize();
-        if (!this.root.startsWith(fileRoot.normalize())) {
+        this.fileRoot = fileRoot.toAbsolutePath().normalize();
+        this.root = this.fileRoot.resolve(".koba-stage").normalize();
+        if (!this.root.startsWith(this.fileRoot)) {
             throw new IOException("artifact staging root escapes file root");
         }
         Files.createDirectories(this.root);
@@ -185,6 +186,108 @@ public final class ArtifactStageStore {
         storeMeta(dir, meta);
 
         return status(stageId, meta, completed, true);
+    }
+
+    public synchronized Map<String, Object> readFile(
+            String path,
+            long offset,
+            int length) throws IOException {
+
+        if (path == null || path.isBlank()) {
+            throw new IOException("artifact path is required");
+        }
+        if (offset < 0) {
+            throw new IOException("offset must be non-negative");
+        }
+        if (length <= 0 || length > chunkBytes) {
+            throw new IOException(
+                "length must be between 1 and configured artifact chunk size");
+        }
+
+        Path requested = Path.of(path.trim());
+        Path candidate = requested.isAbsolute()
+            ? requested.normalize()
+            : fileRoot.resolve(requested).normalize();
+
+        if (!candidate.startsWith(fileRoot)) {
+            throw new IOException("artifact path is outside configured file root");
+        }
+        if (!Files.isRegularFile(candidate)) {
+            throw new IOException("artifact file does not exist");
+        }
+
+        Path realRoot = fileRoot.toRealPath();
+        Path realFile = candidate.toRealPath();
+        if (!realFile.startsWith(realRoot)) {
+            throw new IOException("artifact path resolves outside configured file root");
+        }
+
+        long size = Files.size(realFile);
+        if (offset > size) {
+            throw new IOException("offset exceeds artifact file size");
+        }
+
+        int toRead = (int) Math.min((long) length, size - offset);
+        byte[] payload = new byte[toRead];
+        int read = 0;
+        try (InputStream in = Files.newInputStream(realFile)) {
+            long skipped = 0;
+            while (skipped < offset) {
+                long delta = in.skip(offset - skipped);
+                if (delta <= 0) {
+                    throw new IOException("unable to seek artifact file");
+                }
+                skipped += delta;
+            }
+            while (read < toRead) {
+                int delta = in.read(payload, read, toRead - read);
+                if (delta < 0) {
+                    break;
+                }
+                read += delta;
+            }
+        }
+
+        if (read != payload.length) {
+            payload = java.util.Arrays.copyOf(payload, read);
+        }
+        long nextOffset = offset + read;
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("path", realFile.toAbsolutePath().toString());
+        out.put("offset", offset);
+        out.put("bytes_read", read);
+        out.put("next_offset", nextOffset);
+        out.put("size_bytes", size);
+        out.put("eof", nextOffset >= size);
+        out.put("data_base64", Base64.getEncoder().encodeToString(payload));
+        return out;
+    }
+
+    public synchronized Map<String, Object> deleteFile(String path) throws IOException {
+        if (path == null || path.isBlank()) {
+            throw new IOException("artifact path is required");
+        }
+        Path requested = Path.of(path.trim());
+        Path candidate = requested.isAbsolute()
+            ? requested.normalize()
+            : fileRoot.resolve(requested).normalize();
+        if (!candidate.startsWith(fileRoot)) {
+            throw new IOException("artifact path is outside configured file root");
+        }
+        if (!Files.isRegularFile(candidate)) {
+            throw new IOException("artifact file does not exist");
+        }
+        Path realRoot = fileRoot.toRealPath();
+        Path realFile = candidate.toRealPath();
+        if (!realFile.startsWith(realRoot)) {
+            throw new IOException("artifact path resolves outside configured file root");
+        }
+        Files.delete(realFile);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("path", realFile.toAbsolutePath().toString());
+        out.put("deleted", true);
+        return out;
     }
 
     public synchronized Map<String, Object> cancel(String stageId) throws IOException {
