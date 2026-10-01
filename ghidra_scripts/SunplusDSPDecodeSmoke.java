@@ -12,8 +12,8 @@ import ghidra.program.model.scalar.Scalar;
 
 public class SunplusDSPDecodeSmoke extends GhidraScript {
     private Instruction decode(long wordAddress) throws Exception {
-        Address address = currentProgram.getAddressFactory()
-            .getAddressSpace("PM").getAddress(wordAddress);
+        var pm = currentProgram.getAddressFactory().getAddressSpace("PM");
+        Address address = pm.getAddress(wordAddress * pm.getAddressableUnitSize());
         if (!disassemble(address)) {
             throw new AssertionError("Disassembly failed at " + address);
         }
@@ -61,8 +61,11 @@ public class SunplusDSPDecodeSmoke extends GhidraScript {
         Instruction jump = decode(0);
         requireMnemonic(jump, "JUMP");
         Address[] flows = jump.getFlows();
-        if (flows.length != 1 || flows[0].getOffset() != 0x1820L) {
-            throw new AssertionError("Expected JUMP target PM:1820, got: " + jump);
+        long unitSize = flows.length == 0 ? 1 : flows[0].getAddressSpace().getAddressableUnitSize();
+        long targetWordAddress = flows.length == 0 ? -1 : flows[0].getOffset() / unitSize;
+        if (flows.length != 1 || targetWordAddress != 0x1820L) {
+            throw new AssertionError("Expected JUMP target PM:1820, got: " + jump +
+                " rawFlow=" + (flows.length == 0 ? "<none>" : flows[0]));
         }
 
         requireMnemonic(decode(1), "RTS");

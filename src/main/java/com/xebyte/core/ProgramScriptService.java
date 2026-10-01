@@ -105,6 +105,15 @@ public class ProgramScriptService {
         }
         return null;
     }
+    private boolean prepareAndRunAutoAnalysis(Program program, boolean force) throws Exception {
+        SunplusSrvdspPostProcessor.Result preparation =
+            SunplusSrvdspPostProcessor.prepare(program, ghidra.util.task.TaskMonitor.DUMMY);
+        if (preparation.applicable()) {
+            Msg.info(this, "Prepared Sunplus srvdsp: handlers=" + preparation.handlerCount()
+                + ", functions=" + preparation.functionCount());
+        }
+        return runAutoAnalysisAndPersistFlags(program, force);
+    }
 
     private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
         if (program == null) {
@@ -1825,7 +1834,7 @@ public class ProgramScriptService {
 
                 boolean analyzed = false;
                 if (autoAnalyze) {
-                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
+                    analyzed = prepareAndRunAutoAnalysis(program, true);
                 } else {
                     try {
                         suppressAnalysisPrompt(program);
@@ -1861,18 +1870,26 @@ public class ProgramScriptService {
         Program[] openPrograms = programProvider.getAllOpenPrograms();
         for (Program prog : openPrograms) {
             if (prog.getDomainFile().getPathname().equals(path)) {
-                // Already open, just switch to it
+                // Already open: switching must still honor auto_analyze.
+                // Raw Sunplus DSP programs need rebase + vector-function seeding first.
+                boolean analyzed = false;
                 try {
-                    suppressAnalysisPrompt(prog);
+                    if (autoAnalyze) {
+                        analyzed = prepareAndRunAutoAnalysis(prog, true);
+                    } else {
+                        suppressAnalysisPrompt(prog);
+                    }
                 } catch (Exception e) {
-                    Msg.warn(this, "Failed to save analysis prompt flags: " + e.getMessage());
+                    return Response.err("Failed to prepare already-open program for analysis: " + e.getMessage());
                 }
                 programProvider.setCurrentProgram(prog);
                 return Response.ok(JsonHelper.mapOf(
                     "success", true,
                     "message", "Program already open, switched to it",
                     "name", prog.getName(),
-                    "path", path
+                    "path", path,
+                    "auto_analyzed", analyzed,
+                    "function_count", prog.getFunctionManager().getFunctionCount()
                 ));
             }
         }
@@ -1906,7 +1923,7 @@ public class ProgramScriptService {
 
                 boolean analyzed = false;
                 if (autoAnalyze) {
-                    analyzed = runAutoAnalysisAndPersistFlags(program, true);
+                    analyzed = prepareAndRunAutoAnalysis(program, true);
                 } else {
                     try {
                         suppressAnalysisPrompt(program);
@@ -2081,7 +2098,7 @@ public class ProgramScriptService {
 
             boolean autoAnalyzed = false;
             if (autoAnalyze) {
-                autoAnalyzed = runAutoAnalysisAndPersistFlags(program, true);
+                autoAnalyzed = prepareAndRunAutoAnalysis(program, true);
             } else {
                 try {
                     suppressAnalysisPrompt(program);
@@ -2136,7 +2153,7 @@ public class ProgramScriptService {
         Program program = pe.program();
 
         try {
-            boolean analyzed = runAutoAnalysisAndPersistFlags(program, true);
+            boolean analyzed = prepareAndRunAutoAnalysis(program, true);
             return Response.ok(JsonHelper.mapOf(
                 "success", analyzed,
                 "name", program.getName(),

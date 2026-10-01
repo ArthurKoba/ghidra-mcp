@@ -46,3 +46,16 @@ SunplusSPHEAudioDSP:BE:16:default and checking the known regression words.
 Do not use this module to infer Sunplus-specific DM width, DSP clock, PM/DM
 capacity, or peripheral mapping. Those remain target behavior-analysis
 questions.
+
+## srvdsp analysis contract
+
+The canonical 1128-byte `srvdsp.bin` corpus is the decompiler-grade acceptance target for this language module. The recovered image is loaded at PM word address `0x1800`; its first 32 words are a vector table and the locally implemented code occupies `PM:0x1820..0x1894`.
+
+Important Ghidra modeling details:
+
+- PM uses `wordsize=3` and therefore **must use `alignment=3`**. `alignment=1` compiles but Ghidra 12.1.3 will not create instructions for the 24-bit stream.
+- Java address APIs operate in byte offsets. Target DSP word addresses must be converted through `AddressSpace.getAddressableUnitSize()` before rebase, disassembly, or function creation.
+- The compiler spec exposes a synthetic `SP` in DM solely to satisfy Ghidra stack/decompiler ABI requirements. This does not assert a physical software stack on the DSP; architectural return behavior remains represented by `PCSTACKTOP`.
+- Jumps from the wrapper into resident PM outside the image are represented by `dsp_resident_tailcall` userops. This preserves the handoff target without inventing absent resident bytes and prevents the decompiler from following unmapped PM.
+
+Acceptance requires the canonical corpus to produce zero undefined words in the 117-word local code region, seed all nine vector handlers as functions, and successfully generate decompiler output for all nine functions.
