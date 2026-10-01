@@ -135,6 +135,7 @@ RUN mkdir -p /app /data /projects /artifacts/inbox /artifacts/exports /artifacts
 # Copy the built JAR (naming may vary based on version)
 COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
 COPY ghidra_scripts /app/ghidra_scripts
+COPY tests/fixtures/sunplus_sphe_audio_dsp/srvdsp.bin /app/test-fixtures/srvdsp.bin
 
 # Copy entrypoint script and fix line endings (Windows -> Unix)
 COPY docker/entrypoint.sh /app/
@@ -163,8 +164,21 @@ RUN set -eux; \
       -processor "SunplusSPHEAudioDSP:BE:16:default" \
       -cspec default \
       -noanalysis \
+      -scriptPath /app/ghidra_scripts \
+      -postScript SunplusDSPDecodeSmoke.java \
       -deleteProject; \
-    rm -f /tmp/sunplus-sphe-smoke.bin
+    rm -f /tmp/sunplus-sphe-smoke.bin; \
+    mkdir -p /tmp/sunplus-srvdsp-projects; \
+    /opt/ghidra/support/analyzeHeadless \
+      /tmp/sunplus-srvdsp-projects sunplus-srvdsp \
+      -import /app/test-fixtures/srvdsp.bin \
+      -loader BinaryLoader \
+      -processor "SunplusSPHEAudioDSP:BE:16:default" \
+      -cspec default \
+      -scriptPath /app/ghidra_scripts \
+      -postScript SunplusSrvdspAnalyze.java \
+      -postScript SunplusSrvdspAcceptance.java \
+      -deleteProject
 
 # Expose port
 EXPOSE 8089 8090 8091 8092 8093

@@ -6,13 +6,14 @@
 # details.
 
 define endian=big;
-define alignment=1;
+define alignment=3;
 
 # PM is addressed in 24-bit instruction words. DM is modeled with the
 # standard ADSP-218x 16-bit word width for the instruction forms implemented
 # here; Sunplus-specific wider service values are not asserted by this model.
 define space PM       type=ram_space      size=2 wordsize=3 default;
 define space DM       type=ram_space      size=2 wordsize=2;
+define space IO       type=ram_space      size=2 wordsize=2;
 define space register type=register_space size=2;
 
 define register offset=0x000 size=2 [
@@ -31,25 +32,76 @@ define register offset=0x080 size=2 [
     RX0 TX0 RX1 TX1 IFC OWRCNTR PMOVLAY DMOVLAY
 ];
 
-define register offset=0x0c0 size=2 [ PC PCSTACKTOP ];
+define register offset=0x020 size=2 [ AF MF ];
+define register offset=0x0c0 size=2 [ PC PCSTACKTOP SP ];
+# Internal condition latches used by the SLEIGH model.  srvdsp does not
+# directly write ASTAT, so keeping the predicates explicit produces stable
+# P-code while ASTAT remains available as the architectural register.
+define register offset=0x0d0 size=1 [ AZF ANF AVF ACF MVF CEF ];
 
-define token inst24(24)
+define token inst24(24) endian = big
     whole24 = (0,23)
+
+    # Type 3 / 6 / 7 common direct/immediate fields.
     type3   = (21,23)
     dir20   = (20,20)
     rgp     = (18,19)
     addr14  = (4,17)
     reg4    = (0,3)
-
     op4     = (20,23)
     imm16   = (4,19)
     data14  = (4,17)
     dreg4   = (0,3)
 
+    # Type 4 / 9 ALU-MAC fields.
+    g20     = (20,20)
+    d19     = (19,19)
+    z18     = (18,18)
+    amf5    = (13,17)
+    yop2    = (11,12)
+    xop3    = (8,10)
+    t4_dreg = (4,7)
+    dag_i2  = (2,3)
+    dag_m2  = (0,1)
+    type9   = (19,23)
+    mid4    = (4,7)
+    yy2     = (11,12)
+    cc2     = (6,7)
+    bo2     = (4,5)
+
+    # Type 10 / 11 flow fields.
     type10  = (19,23)
     call18  = (18,18)
     cond4   = (0,3)
+    type11  = (18,23)
+    loop14  = (4,17)
+    term4   = (0,3)
+
+    # Type 15 immediate shifter.
+    type15  = (15,23)
+    sf4     = (11,14)
+    shx3    = (8,10)
+    sexp8   = (0,7) signed
+
+    # Type 17 internal register move.
+    type17  = (12,23)
+    dst_rgp = (10,11)
+    src_rgp = (8,9)
+    dst_reg = (4,7)
+    src_reg = (0,3)
+
+    # Type 20 conditional return.
+    ret19   = (5,23)
+    rettype = (4,4)
+
+    # Type 29 I/O-space move.
+    type29  = (16,23)
+    iodir   = (15,15)
+    ioaddr  = (4,14)
+    iodreg  = (0,3)
 ;
+
+define pcodeop dsp_do_until;
 
 DReg: AX0 is dreg4=0x0 & AX0 { export AX0; }
 DReg: AX1 is dreg4=0x1 & AX1 { export AX1; }
@@ -128,17 +180,132 @@ RegSel: TX1     is rgp=3 & reg4=0xb & TX1 { export TX1; }
 RegSel: IFC     is rgp=3 & reg4=0xc & IFC { export IFC; }
 RegSel: OWRCNTR is rgp=3 & reg4=0xd & OWRCNTR { export OWRCNTR; }
 
+# -----------------------------------------------------------------------------
+# Operand subtables used by the srvdsp instruction corpus.
+# -----------------------------------------------------------------------------
+
+DReg4: AX0 is t4_dreg=0x0 & AX0 { export AX0; }
+DReg4: AX1 is t4_dreg=0x1 & AX1 { export AX1; }
+DReg4: MX0 is t4_dreg=0x2 & MX0 { export MX0; }
+DReg4: MX1 is t4_dreg=0x3 & MX1 { export MX1; }
+DReg4: AY0 is t4_dreg=0x4 & AY0 { export AY0; }
+DReg4: AY1 is t4_dreg=0x5 & AY1 { export AY1; }
+DReg4: MY0 is t4_dreg=0x6 & MY0 { export MY0; }
+DReg4: MY1 is t4_dreg=0x7 & MY1 { export MY1; }
+DReg4: SI  is t4_dreg=0x8 & SI  { export SI; }
+DReg4: SE  is t4_dreg=0x9 & SE  { export SE; }
+DReg4: AR  is t4_dreg=0xa & AR  { export AR; }
+DReg4: MR0 is t4_dreg=0xb & MR0 { export MR0; }
+DReg4: MR1 is t4_dreg=0xc & MR1 { export MR1; }
+DReg4: MR2 is t4_dreg=0xd & MR2 { export MR2; }
+DReg4: SR0 is t4_dreg=0xe & SR0 { export SR0; }
+DReg4: SR1 is t4_dreg=0xf & SR1 { export SR1; }
+
+IODReg: AX0 is iodreg=0x0 & AX0 { export AX0; }
+IODReg: AX1 is iodreg=0x1 & AX1 { export AX1; }
+IODReg: MX0 is iodreg=0x2 & MX0 { export MX0; }
+IODReg: MX1 is iodreg=0x3 & MX1 { export MX1; }
+IODReg: AY0 is iodreg=0x4 & AY0 { export AY0; }
+IODReg: AY1 is iodreg=0x5 & AY1 { export AY1; }
+IODReg: MY0 is iodreg=0x6 & MY0 { export MY0; }
+IODReg: MY1 is iodreg=0x7 & MY1 { export MY1; }
+IODReg: SI  is iodreg=0x8 & SI  { export SI; }
+IODReg: SE  is iodreg=0x9 & SE  { export SE; }
+IODReg: AR  is iodreg=0xa & AR  { export AR; }
+IODReg: MR0 is iodreg=0xb & MR0 { export MR0; }
+IODReg: MR1 is iodreg=0xc & MR1 { export MR1; }
+IODReg: MR2 is iodreg=0xd & MR2 { export MR2; }
+IODReg: SR0 is iodreg=0xe & SR0 { export SR0; }
+IODReg: SR1 is iodreg=0xf & SR1 { export SR1; }
+
+ALUX: AX0 is xop3=0 & AX0 { export AX0; }
+ALUX: AX1 is xop3=1 & AX1 { export AX1; }
+ALUX: AR  is xop3=2 & AR  { export AR; }
+ALUX: MR0 is xop3=3 & MR0 { export MR0; }
+ALUX: MR1 is xop3=4 & MR1 { export MR1; }
+ALUX: MR2 is xop3=5 & MR2 { export MR2; }
+ALUX: SR0 is xop3=6 & SR0 { export SR0; }
+ALUX: SR1 is xop3=7 & SR1 { export SR1; }
+
+ALUY: AY0 is yop2=0 & AY0 { export AY0; }
+ALUY: AY1 is yop2=1 & AY1 { export AY1; }
+ALUY: AF  is yop2=2 & AF  { export AF; }
+ALUY: 0   is yop2=3 { export 0:2; }
+
+MACX: MX0 is xop3=0 & MX0 { export MX0; }
+MACX: MX1 is xop3=1 & MX1 { export MX1; }
+MACX: AR  is xop3=2 & AR  { export AR; }
+MACX: MR0 is xop3=3 & MR0 { export MR0; }
+MACX: MR1 is xop3=4 & MR1 { export MR1; }
+MACX: MR2 is xop3=5 & MR2 { export MR2; }
+MACX: SR0 is xop3=6 & SR0 { export SR0; }
+MACX: SR1 is xop3=7 & SR1 { export SR1; }
+
+MACY: MY0 is yop2=0 & MY0 { export MY0; }
+MACY: MY1 is yop2=1 & MY1 { export MY1; }
+MACY: MF  is yop2=2 & MF  { export MF; }
+MACY: 0   is yop2=3 { export 0:2; }
+
+ShiftX: SI  is shx3=0 & SI  { export SI; }
+ShiftX: AR  is shx3=2 & AR  { export AR; }
+ShiftX: MR0 is shx3=3 & MR0 { export MR0; }
+ShiftX: MR1 is shx3=4 & MR1 { export MR1; }
+ShiftX: MR2 is shx3=5 & MR2 { export MR2; }
+ShiftX: SR0 is shx3=6 & SR0 { export SR0; }
+ShiftX: SR1 is shx3=7 & SR1 { export SR1; }
+
+DagI: I0 is g20=0 & dag_i2=0 & I0 { export I0; }
+DagI: I1 is g20=0 & dag_i2=1 & I1 { export I1; }
+DagI: I2 is g20=0 & dag_i2=2 & I2 { export I2; }
+DagI: I3 is g20=0 & dag_i2=3 & I3 { export I3; }
+DagI: I4 is g20=1 & dag_i2=0 & I4 { export I4; }
+DagI: I5 is g20=1 & dag_i2=1 & I5 { export I5; }
+DagI: I6 is g20=1 & dag_i2=2 & I6 { export I6; }
+DagI: I7 is g20=1 & dag_i2=3 & I7 { export I7; }
+
+DagM: M0 is g20=0 & dag_m2=0 & M0 { export M0; }
+DagM: M1 is g20=0 & dag_m2=1 & M1 { export M1; }
+DagM: M2 is g20=0 & dag_m2=2 & M2 { export M2; }
+DagM: M3 is g20=0 & dag_m2=3 & M3 { export M3; }
+DagM: M4 is g20=1 & dag_m2=0 & M4 { export M4; }
+DagM: M5 is g20=1 & dag_m2=1 & M5 { export M5; }
+DagM: M6 is g20=1 & dag_m2=2 & M6 { export M6; }
+DagM: M7 is g20=1 & dag_m2=3 & M7 { export M7; }
+
 JumpAddr: addr14 is addr14 { export *[PM]:2 addr14; }
+LoopAddr: loop14 is loop14 { export *[PM]:2 loop14; }
+
+macro alu_flags_add(a, b, r) {
+    AZF = (r == 0);
+    ANF = (r s< 0);
+    AVF = scarry(a, b);
+}
+
+macro alu_flags_sub(a, b, r) {
+    AZF = (r == 0);
+    ANF = (r s< 0);
+    AVF = sborrow(a, b);
+}
+
+macro alu_flags_logic(r) {
+    AZF = (r == 0);
+    ANF = (r s< 0);
+    AVF = 0;
+}
+
+# -----------------------------------------------------------------------------
+# Direct/immediate moves (Types 3, 6, 7).
+# -----------------------------------------------------------------------------
 
 :DMREAD RegSel, addr14 is type3=4 & dir20=0 & RegSel & addr14
 {
-    dmaddr:2 = addr14;
+    local dmaddr:2 = addr14;
     RegSel = *[DM]:2 dmaddr;
 }
 
 :DMWRITE addr14, RegSel is type3=4 & dir20=1 & RegSel & addr14
 {
-    dmaddr:2 = addr14;
+    local dmaddr:2 = addr14;
     *[DM]:2 dmaddr = RegSel;
 }
 
@@ -152,19 +319,292 @@ JumpAddr: addr14 is addr14 { export *[PM]:2 addr14; }
     RegSel = data14;
 }
 
-:JUMP JumpAddr is type10=3 & call18=0 & cond4=0xf & JumpAddr
+# -----------------------------------------------------------------------------
+# Type 4: ALU/MAC with DM read/write.
+# srvdsp uses the no-compute DM-write form at PM:186c.
+# -----------------------------------------------------------------------------
+
+:DMWRITE DagI, DagM, DReg4 is type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
+{
+    local dmaddr:2 = DagI;
+    *[DM]:2 dmaddr = DReg4;
+    DagI = DagI + DagM;
+}
+
+:DMREAD DReg4, DagI, DagM is type3=3 & d19=0 & amf5=0 & DagI & DagM & DReg4
+{
+    local dmaddr:2 = DagI;
+    DReg4 = *[DM]:2 dmaddr;
+    DagI = DagI + DagM;
+}
+
+# -----------------------------------------------------------------------------
+# Type 9: unconditional ALU/MAC forms present in srvdsp.
+# -----------------------------------------------------------------------------
+
+:AR "=" ALUY "- 1" is type9=4 & z18=0 & amf5=24 & ALUY & mid4=0 & cond4=15
+{
+    local old:2 = ALUY;
+    AR = old - 1;
+    alu_flags_sub(old, 1:2, AR);
+}
+
+:AR "=" ALUX "-" ALUY is type9=4 & z18=0 & amf5=23 & ALUX & ALUY & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    local oldy:2 = ALUY;
+    AR = oldx - oldy;
+    alu_flags_sub(oldx, oldy, AR);
+}
+
+:AF "=" ALUX "+" ALUY is type9=4 & z18=1 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    local oldy:2 = ALUY;
+    AF = oldx + oldy;
+    alu_flags_add(oldx, oldy, AF);
+}
+
+:AR "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    local oldy:2 = ALUY;
+    AR = oldx + oldy;
+    alu_flags_add(oldx, oldy, AR);
+}
+
+:AR "=" "ABS" ALUX is type9=4 & z18=0 & amf5=31 & ALUX & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    if (oldx s>= 0) goto <abs_pos>;
+    AR = -oldx;
+    goto <abs_done>;
+<abs_pos>
+    AR = oldx;
+<abs_done>
+    AZF = (AR == 0);
+    ANF = (AR s< 0);
+    AVF = (oldx == 0x8000);
+}
+
+:AF "=" "ABS" ALUX is type9=4 & z18=1 & amf5=31 & ALUX & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    if (oldx s>= 0) goto <absf_pos>;
+    AF = -oldx;
+    goto <absf_done>;
+<absf_pos>
+    AF = oldx;
+<absf_done>
+    AZF = (AF == 0);
+    ANF = (AF s< 0);
+    AVF = (oldx == 0x8000);
+}
+
+:AR "=" ALUX "XOR" ALUY is type9=4 & z18=0 & amf5=30 & ALUX & ALUY & mid4=0 & cond4=15
+{
+    AR = ALUX ^ ALUY;
+    alu_flags_logic(AR);
+}
+
+:AF "=" ALUY "-" ALUX is type9=4 & z18=1 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=15
+{
+    local oldx:2 = ALUX;
+    local oldy:2 = ALUY;
+    AF = oldy - oldx;
+    alu_flags_sub(oldy, oldx, AF);
+}
+
+:MR "=" MACX "*" MACY is type9=4 & z18=0 & amf5=4 & MACX & MACY & mid4=0 & cond4=15
+{
+    local sx:4 = sext(MACX);
+    local sy:4 = sext(MACY);
+    local prod:4 = sx * sy;
+    MR0 = prod:2;
+    MR1 = prod[16,16];
+    MR2 = 0;
+    MVF = 0;
+}
+
+# Type-9 constant forms used by srvdsp (BO=01 => positive power-of-two).
+:AR "=" ALUX "+ 1" is type9=4 & z18=0 & amf5=19 & yy2=0 & ALUX & cc2=0 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AR = oldx + 1;
+    alu_flags_add(oldx, 1:2, AR);
+}
+
+:AF "=" ALUX "+ 1" is type9=4 & z18=1 & amf5=19 & yy2=0 & ALUX & cc2=0 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AF = oldx + 1;
+    alu_flags_add(oldx, 1:2, AF);
+}
+
+:AR "=" ALUX "- 2" is type9=4 & z18=0 & amf5=23 & yy2=0 & ALUX & cc2=1 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AR = oldx - 2;
+    alu_flags_sub(oldx, 2:2, AR);
+}
+
+:AR "=" ALUX "- 0x80" is type9=4 & z18=0 & amf5=23 & yy2=1 & ALUX & cc2=3 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AR = oldx - 0x80;
+    alu_flags_sub(oldx, 0x80:2, AR);
+}
+
+:AR "=" ALUX "- 0x200" is type9=4 & z18=0 & amf5=23 & yy2=2 & ALUX & cc2=1 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AR = oldx - 0x200;
+    alu_flags_sub(oldx, 0x200:2, AR);
+}
+
+# -----------------------------------------------------------------------------
+# Type 10 flow control.  srvdsp uses NE, GT, LT, and ALWAYS.
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Resident PM handoff.
+#
+# srvdsp is a wrapper image loaded at PM:0x1800. Several terminal/conditional
+# jumps hand control to resident DSP firmware below that window. Those bytes are
+# not present in srvdsp.bin, so model the handoff as an opaque userop rather than
+# inventing resident instructions or making the decompiler chase unmapped PM.
+# The numeric target remains explicit in P-code/C output.
+# -----------------------------------------------------------------------------
+
+define pcodeop dsp_resident_tailcall;
+
+macro resident_tail(target) {
+    dsp_resident_tailcall(target);
+    return [PCSTACKTOP];
+}
+
+# Unconditional resident targets observed in the srvdsp corpus.
+:JUMP_RESIDENT_00E0 is type10=3 & call18=0 & addr14=0x00e0 & cond4=15 { resident_tail(0x00e0:2); }
+:JUMP_RESIDENT_0036 is type10=3 & call18=0 & addr14=0x0036 & cond4=15 { resident_tail(0x0036:2); }
+:JUMP_RESIDENT_0539 is type10=3 & call18=0 & addr14=0x0539 & cond4=15 { resident_tail(0x0539:2); }
+:JUMP_RESIDENT_05A4 is type10=3 & call18=0 & addr14=0x05a4 & cond4=15 { resident_tail(0x05a4:2); }
+:JUMP_RESIDENT_08ED is type10=3 & call18=0 & addr14=0x08ed & cond4=15 { resident_tail(0x08ed:2); }
+:JUMP_RESIDENT_0EBB is type10=3 & call18=0 & addr14=0x0ebb & cond4=15 { resident_tail(0x0ebb:2); }
+:JUMP_RESIDENT_04BC is type10=3 & call18=0 & addr14=0x04bc & cond4=15 { resident_tail(0x04bc:2); }
+:JUMP_RESIDENT_092C is type10=3 & call18=0 & addr14=0x092c & cond4=15 { resident_tail(0x092c:2); }
+:JUMP_RESIDENT_0398 is type10=3 & call18=0 & addr14=0x0398 & cond4=15 { resident_tail(0x0398:2); }
+:JUMP_RESIDENT_10C5 is type10=3 & call18=0 & addr14=0x10c5 & cond4=15 { resident_tail(0x10c5:2); }
+:JUMP_RESIDENT_0231 is type10=3 & call18=0 & addr14=0x0231 & cond4=15 { resident_tail(0x0231:2); }
+
+# Conditional resident handoffs used by srvdsp.
+:"IF GT JUMP_RESIDENT_0539" is type10=3 & call18=0 & addr14=0x0539 & cond4=2
+{
+    local gt:1 = (AZF == 0) && (ANF == AVF);
+    if (gt == 0) goto inst_next;
+    resident_tail(0x0539:2);
+}
+
+:"IF LT JUMP_RESIDENT_0539" is type10=3 & call18=0 & addr14=0x0539 & cond4=4
+{
+    if (ANF == AVF) goto inst_next;
+    resident_tail(0x0539:2);
+}
+
+:"IF NE JUMP_RESIDENT_0D04" is type10=3 & call18=0 & addr14=0x0d04 & cond4=1
+{
+    if (AZF != 0) goto inst_next;
+    resident_tail(0x0d04:2);
+}
+
+:JUMP JumpAddr is type10=3 & call18=0 & cond4=15 & JumpAddr
 {
     goto JumpAddr;
 }
 
-:CALL JumpAddr is type10=3 & call18=1 & cond4=0xf & JumpAddr
+:CALL JumpAddr is type10=3 & call18=1 & cond4=15 & JumpAddr
 {
     call JumpAddr;
 }
 
-:RTS is whole24=0x0a000f
+:"IF NE JUMP" JumpAddr is type10=3 & call18=0 & cond4=1 & JumpAddr
+{
+    if (AZF == 0) goto JumpAddr;
+}
+
+:"IF GT JUMP" JumpAddr is type10=3 & call18=0 & cond4=2 & JumpAddr
+{
+    if (AZF != 0) goto <gt_fallthrough>;
+    if (ANF == AVF) goto JumpAddr;
+<gt_fallthrough>
+}
+
+:"IF LT JUMP" JumpAddr is type10=3 & call18=0 & cond4=4 & JumpAddr
+{
+    if (ANF != AVF) goto JumpAddr;
+}
+
+# -----------------------------------------------------------------------------
+# Type 11 zero-overhead loop setup.  The loop-end flow is hardware-managed;
+# retain the setup as a userop until a loop-context analyzer injects the back
+# edge.  Fallthrough remains correct for function discovery.
+# -----------------------------------------------------------------------------
+
+:"DO" LoopAddr "UNTIL CE" is type11=5 & term4=14 & LoopAddr
+{
+    dsp_do_until(LoopAddr, CNTR);
+}
+
+# -----------------------------------------------------------------------------
+# Type 15 immediate shifter.  srvdsp uses ASHIFT (LO) MR1 BY +4.
+# -----------------------------------------------------------------------------
+
+:SR "=" "ASHIFT" ShiftX "BY 4" is type15=0x1e & sf4=6 & ShiftX & sexp8=4
+{
+    local src:4 = sext(ShiftX);
+    local res:4 = src << 4;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+# -----------------------------------------------------------------------------
+# Type 17 internal data-register move.  General register mapping is deferred;
+# srvdsp uses exactly AY0 = SR0 at PM:1863.
+# -----------------------------------------------------------------------------
+
+:AY0 "=" "SR0" is type17=0x0d0 & dst_rgp=0 & src_rgp=0 & dst_reg=4 & src_reg=14
+{
+    AY0 = SR0;
+}
+
+# -----------------------------------------------------------------------------
+# Type 20 returns used by srvdsp.
+# -----------------------------------------------------------------------------
+
+:RTS is ret19=0x5000 & rettype=0 & cond4=15
 {
     return [PCSTACKTOP];
+}
+
+:"IF NE RTS" is ret19=0x5000 & rettype=0 & cond4=1
+{
+    if (AZF != 0) goto inst_next;
+    return [PCSTACKTOP];
+}
+
+# -----------------------------------------------------------------------------
+# Type 29 I/O-space read/write.
+# -----------------------------------------------------------------------------
+
+:IOWRITE ioaddr, IODReg is type29=1 & iodir=1 & ioaddr & IODReg
+{
+    local a:2 = ioaddr;
+    *[IO]:2 a = IODReg;
+}
+
+:IOREAD IODReg, ioaddr is type29=1 & iodir=0 & ioaddr & IODReg
+{
+    local a:2 = ioaddr;
+    IODReg = *[IO]:2 a;
 }
 
 :NOP is whole24=0x000000

@@ -74,6 +74,23 @@ jobs:
           -processor "SunplusSPHEAudioDSP:BE:16:default" \
           -cspec default \
           -noanalysis \
+          -scriptPath "$PWD/ghidra_scripts" \
+          -postScript SunplusDSPDecodeSmoke.java \
+          -deleteProject
+
+    - name: Analyze and decompile canonical srvdsp corpus
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-srvdsp-projects
+        "$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-srvdsp-projects sunplus-srvdsp \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/srvdsp.bin \
+          -loader BinaryLoader \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -cspec default \
+          -scriptPath "$PWD/ghidra_scripts" \
+          -postScript SunplusSrvdspAnalyze.java \
+          -postScript SunplusSrvdspAcceptance.java \
           -deleteProject
 
     - name: Install Ghidra JARs to Maven local repository

@@ -8,12 +8,16 @@
     <range space="PM"/>
     <range space="DM"/>
   </global>
+  <!-- Ghidra requires a stack model for decompiler/stack analyzers. The DSP
+       architectural return stack remains modeled separately by PCSTACKTOP. -->
+  <stackpointer register="SP" space="DM" growth="negative"/>
   <default_proto>
     <prototype name="default" extrapop="0" stackshift="0">
       <input/>
       <output/>
       <unaffected>
         <register name="PC"/>
+        <register name="SP"/>
       </unaffected>
     </prototype>
   </default_proto>
