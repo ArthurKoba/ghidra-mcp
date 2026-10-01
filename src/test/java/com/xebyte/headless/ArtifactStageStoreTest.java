@@ -98,11 +98,21 @@ public class ArtifactStageStoreTest extends TestCase {
             Base64.getDecoder().decode((String) second.get("data_base64")),
             StandardCharsets.UTF_8));
 
+        Map<String, Object> deleted = store.deleteFile(file.toString());
+        assertEquals(Boolean.TRUE, deleted.get("deleted"));
+        assertFalse(Files.exists(file));
+
         Path outside = Files.createTempFile("artifact-read-outside", ".bin");
         Files.writeString(outside, "secret");
         try {
             store.readFile(outside.toString(), 0, 6);
             fail("outside path should fail");
+        } catch (java.io.IOException expected) {
+            assertTrue(expected.getMessage().contains("outside configured file root"));
+        }
+        try {
+            store.deleteFile(outside.toString());
+            fail("outside delete should fail");
         } catch (java.io.IOException expected) {
             assertTrue(expected.getMessage().contains("outside configured file root"));
         }
