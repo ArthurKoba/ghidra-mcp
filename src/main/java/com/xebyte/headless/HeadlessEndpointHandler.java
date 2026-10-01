@@ -107,10 +107,13 @@ public class HeadlessEndpointHandler {
     }
 
     private String getProgramError(String programName) {
+        String recovery = " The project may still contain the saved program; reopen it with "
+                + "load_program_from_project/open_program using its project path.";
         if (programName != null && !programName.isEmpty()) {
-            return "{\"error\": \"Program not found: " + escapeJson(programName) + "\"}";
+            return "{\"error\": \"Program not found: " + escapeJson(programName)
+                    + escapeJson(recovery) + "\"}";
         }
-        return "{\"error\": \"No program currently loaded\"}";
+        return "{\"error\": \"No program currently loaded." + escapeJson(recovery) + "\"}";
     }
 
     private String escapeJson(String s) {

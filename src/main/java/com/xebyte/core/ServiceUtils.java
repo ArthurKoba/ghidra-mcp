@@ -636,9 +636,12 @@ public final class ServiceUtils {
                 }
                 available = " Available programs: " + sb;
             }
+            String recovery = " In a project-scoped headless session this can mean the program is saved "
+                    + "in the project but is not currently open; use list_project_files and "
+                    + "load_program_from_project/open_program with the project path before treating it as missing.";
             String msg = programName != null && !programName.isEmpty()
-                    ? "Program not found: " + programName + available
-                    : "No program loaded." + available;
+                    ? "Program not found: " + programName + available + recovery
+                    : "No program loaded." + available + recovery;
             return new ProgramOrError(null, Response.err(msg));
         }
         return new ProgramOrError(program, null);
