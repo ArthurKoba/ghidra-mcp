@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<language_definitions>
+  <language processor="SunplusSPHEAudioDSP"
+            endian="big"
+            size="16"
+            variant="default"
+            version="0.1"
+            slafile="sunplus_sphe_audio_dsp.sla"
+            processorspec="sunplus_sphe_audio_dsp.pspec"
+            id="SunplusSPHEAudioDSP:BE:16:default">
+    <description>Sunplus SPHE audio DSP (24-bit ADSP-218x-compatible subset)</description>
+    <compiler name="default"
+              spec="sunplus_sphe_audio_dsp.cspec"
+              id="default"/>
+  </language>
+</language_definitions>

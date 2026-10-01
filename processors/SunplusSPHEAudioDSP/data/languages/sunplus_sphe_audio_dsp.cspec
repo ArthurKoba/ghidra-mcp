@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<compiler_spec>
+  <data_organization>
+    <pointer_size value="2"/>
+  </data_organization>
+  <global>
+    <range space="PM"/>
+    <range space="DM"/>
+  </global>
+  <default_proto>
+    <prototype name="default" extrapop="0" stackshift="0">
+      <input/>
+      <output/>
+      <unaffected>
+        <register name="PC"/>
+      </unaffected>
+    </prototype>
+  </default_proto>
+</compiler_spec>

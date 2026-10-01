@@ -33,6 +33,12 @@ RUN unzip -q ghidra.zip && \
     rm ghidra.zip && \
     mv ghidra_* ghidra
 
+# Install the project-local Sunplus SPHE audio-DSP language module and compile
+# its SLEIGH source as part of the immutable image. No runtime volume or
+# entrypoint mutation is required.
+COPY processors/SunplusSPHEAudioDSP /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP
+RUN /opt/ghidra/support/sleigh -a /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP
+
 # Set Ghidra environment
 ENV GHIDRA_HOME=/opt/ghidra
 ENV PATH="${GHIDRA_HOME}:${PATH}"

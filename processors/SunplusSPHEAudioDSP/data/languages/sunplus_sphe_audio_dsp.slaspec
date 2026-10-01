@@ -1,0 +1,172 @@
+# Sunplus SPHE audio DSP
+#
+# The recovered target uses fixed 24-bit program words whose currently proven
+# instruction forms match ADSP-218x encodings. Keep target-specific behavior
+# explicit instead of silently inheriting unproved ADSP-218x integration
+# details.
+
+define endian=big;
+define alignment=1;
+
+# PM is addressed in 24-bit instruction words. DM is modeled with the
+# standard ADSP-218x 16-bit word width for the instruction forms implemented
+# here; Sunplus-specific wider service values are not asserted by this model.
+define space PM       type=ram_space      size=2 wordsize=3 default;
+define space DM       type=ram_space      size=2 wordsize=2;
+define space register type=register_space size=2;
+
+define register offset=0x000 size=2 [
+    AX0 AX1 MX0 MX1 AY0 AY1 MY0 MY1
+    SI SE AR MR0 MR1 MR2 SR0 SR1
+];
+
+define register offset=0x040 size=2 [
+    I0 I1 I2 I3 I4 I5 I6 I7
+    M0 M1 M2 M3 M4 M5 M6 M7
+    L0 L1 L2 L3 L4 L5 L6 L7
+];
+
+define register offset=0x080 size=2 [
+    ASTAT MSTAT SSTAT IMASK ICNTL CNTR SB PX
+    RX0 TX0 RX1 TX1 IFC OWRCNTR PMOVLAY DMOVLAY
+];
+
+define register offset=0x0c0 size=2 [ PC PCSTACKTOP ];
+
+define token inst24(24)
+    whole24 = (0,23)
+    type3   = (21,23)
+    dir20   = (20,20)
+    rgp     = (18,19)
+    addr14  = (4,17)
+    reg4    = (0,3)
+
+    op4     = (20,23)
+    imm16   = (4,19)
+    data14  = (4,17)
+    dreg4   = (0,3)
+
+    type10  = (19,23)
+    call18  = (18,18)
+    cond4   = (0,3)
+;
+
+DReg: AX0 is dreg4=0x0 & AX0 { export AX0; }
+DReg: AX1 is dreg4=0x1 & AX1 { export AX1; }
+DReg: MX0 is dreg4=0x2 & MX0 { export MX0; }
+DReg: MX1 is dreg4=0x3 & MX1 { export MX1; }
+DReg: AY0 is dreg4=0x4 & AY0 { export AY0; }
+DReg: AY1 is dreg4=0x5 & AY1 { export AY1; }
+DReg: MY0 is dreg4=0x6 & MY0 { export MY0; }
+DReg: MY1 is dreg4=0x7 & MY1 { export MY1; }
+DReg: SI  is dreg4=0x8 & SI { export SI; }
+DReg: SE  is dreg4=0x9 & SE { export SE; }
+DReg: AR  is dreg4=0xa & AR { export AR; }
+DReg: MR0 is dreg4=0xb & MR0 { export MR0; }
+DReg: MR1 is dreg4=0xc & MR1 { export MR1; }
+DReg: MR2 is dreg4=0xd & MR2 { export MR2; }
+DReg: SR0 is dreg4=0xe & SR0 { export SR0; }
+DReg: SR1 is dreg4=0xf & SR1 { export SR1; }
+
+RegSel: AX0 is rgp=0 & reg4=0x0 & AX0 { export AX0; }
+RegSel: AX1 is rgp=0 & reg4=0x1 & AX1 { export AX1; }
+RegSel: MX0 is rgp=0 & reg4=0x2 & MX0 { export MX0; }
+RegSel: MX1 is rgp=0 & reg4=0x3 & MX1 { export MX1; }
+RegSel: AY0 is rgp=0 & reg4=0x4 & AY0 { export AY0; }
+RegSel: AY1 is rgp=0 & reg4=0x5 & AY1 { export AY1; }
+RegSel: MY0 is rgp=0 & reg4=0x6 & MY0 { export MY0; }
+RegSel: MY1 is rgp=0 & reg4=0x7 & MY1 { export MY1; }
+RegSel: SI  is rgp=0 & reg4=0x8 & SI { export SI; }
+RegSel: SE  is rgp=0 & reg4=0x9 & SE { export SE; }
+RegSel: AR  is rgp=0 & reg4=0xa & AR { export AR; }
+RegSel: MR0 is rgp=0 & reg4=0xb & MR0 { export MR0; }
+RegSel: MR1 is rgp=0 & reg4=0xc & MR1 { export MR1; }
+RegSel: MR2 is rgp=0 & reg4=0xd & MR2 { export MR2; }
+RegSel: SR0 is rgp=0 & reg4=0xe & SR0 { export SR0; }
+RegSel: SR1 is rgp=0 & reg4=0xf & SR1 { export SR1; }
+
+RegSel: I0 is rgp=1 & reg4=0x0 & I0 { export I0; }
+RegSel: I1 is rgp=1 & reg4=0x1 & I1 { export I1; }
+RegSel: I2 is rgp=1 & reg4=0x2 & I2 { export I2; }
+RegSel: I3 is rgp=1 & reg4=0x3 & I3 { export I3; }
+RegSel: M0 is rgp=1 & reg4=0x4 & M0 { export M0; }
+RegSel: M1 is rgp=1 & reg4=0x5 & M1 { export M1; }
+RegSel: M2 is rgp=1 & reg4=0x6 & M2 { export M2; }
+RegSel: M3 is rgp=1 & reg4=0x7 & M3 { export M3; }
+RegSel: L0 is rgp=1 & reg4=0x8 & L0 { export L0; }
+RegSel: L1 is rgp=1 & reg4=0x9 & L1 { export L1; }
+RegSel: L2 is rgp=1 & reg4=0xa & L2 { export L2; }
+RegSel: L3 is rgp=1 & reg4=0xb & L3 { export L3; }
+RegSel: PMOVLAY is rgp=1 & reg4=0xe & PMOVLAY { export PMOVLAY; }
+RegSel: DMOVLAY is rgp=1 & reg4=0xf & DMOVLAY { export DMOVLAY; }
+
+RegSel: I4 is rgp=2 & reg4=0x0 & I4 { export I4; }
+RegSel: I5 is rgp=2 & reg4=0x1 & I5 { export I5; }
+RegSel: I6 is rgp=2 & reg4=0x2 & I6 { export I6; }
+RegSel: I7 is rgp=2 & reg4=0x3 & I7 { export I7; }
+RegSel: M4 is rgp=2 & reg4=0x4 & M4 { export M4; }
+RegSel: M5 is rgp=2 & reg4=0x5 & M5 { export M5; }
+RegSel: M6 is rgp=2 & reg4=0x6 & M6 { export M6; }
+RegSel: M7 is rgp=2 & reg4=0x7 & M7 { export M7; }
+RegSel: L4 is rgp=2 & reg4=0x8 & L4 { export L4; }
+RegSel: L5 is rgp=2 & reg4=0x9 & L5 { export L5; }
+RegSel: L6 is rgp=2 & reg4=0xa & L6 { export L6; }
+RegSel: L7 is rgp=2 & reg4=0xb & L7 { export L7; }
+
+RegSel: ASTAT   is rgp=3 & reg4=0x0 & ASTAT { export ASTAT; }
+RegSel: MSTAT   is rgp=3 & reg4=0x1 & MSTAT { export MSTAT; }
+RegSel: SSTAT   is rgp=3 & reg4=0x2 & SSTAT { export SSTAT; }
+RegSel: IMASK   is rgp=3 & reg4=0x3 & IMASK { export IMASK; }
+RegSel: ICNTL   is rgp=3 & reg4=0x4 & ICNTL { export ICNTL; }
+RegSel: CNTR    is rgp=3 & reg4=0x5 & CNTR { export CNTR; }
+RegSel: SB      is rgp=3 & reg4=0x6 & SB { export SB; }
+RegSel: PX      is rgp=3 & reg4=0x7 & PX { export PX; }
+RegSel: RX0     is rgp=3 & reg4=0x8 & RX0 { export RX0; }
+RegSel: TX0     is rgp=3 & reg4=0x9 & TX0 { export TX0; }
+RegSel: RX1     is rgp=3 & reg4=0xa & RX1 { export RX1; }
+RegSel: TX1     is rgp=3 & reg4=0xb & TX1 { export TX1; }
+RegSel: IFC     is rgp=3 & reg4=0xc & IFC { export IFC; }
+RegSel: OWRCNTR is rgp=3 & reg4=0xd & OWRCNTR { export OWRCNTR; }
+
+JumpAddr: addr14 is addr14 { export *[PM]:2 addr14; }
+
+:DMREAD RegSel, addr14 is type3=4 & dir20=0 & RegSel & addr14
+{
+    dmaddr:2 = addr14;
+    RegSel = *[DM]:2 dmaddr;
+}
+
+:DMWRITE addr14, RegSel is type3=4 & dir20=1 & RegSel & addr14
+{
+    dmaddr:2 = addr14;
+    *[DM]:2 dmaddr = RegSel;
+}
+
+:LDI DReg, imm16 is op4=4 & DReg & imm16
+{
+    DReg = imm16;
+}
+
+:LDI RegSel, data14 is op4=3 & RegSel & data14
+{
+    RegSel = data14;
+}
+
+:JUMP JumpAddr is type10=3 & call18=0 & cond4=0xf & JumpAddr
+{
+    goto JumpAddr;
+}
+
+:CALL JumpAddr is type10=3 & call18=1 & cond4=0xf & JumpAddr
+{
+    call JumpAddr;
+}
+
+:RTS is whole24=0x0a000f
+{
+    return [PCSTACKTOP];
+}
+
+:NOP is whole24=0x000000
+{
+}
