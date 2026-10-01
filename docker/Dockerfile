@@ -37,7 +37,13 @@ RUN unzip -q ghidra.zip && \
 # its SLEIGH source as part of the immutable image. No runtime volume or
 # entrypoint mutation is required.
 COPY processors/SunplusSPHEAudioDSP /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP
-RUN /opt/ghidra/support/sleigh -a /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP
+RUN set -eux; \
+    LANG_DIR=/opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP/data/languages; \
+    /opt/ghidra/support/sleigh \
+      "$LANG_DIR/sunplus_sphe_audio_dsp.slaspec" \
+      "$LANG_DIR/sunplus_sphe_audio_dsp.sla"; \
+    chmod 0644 "$LANG_DIR/sunplus_sphe_audio_dsp.sla"; \
+    test -s "$LANG_DIR/sunplus_sphe_audio_dsp.sla"
 
 # Set Ghidra environment
 ENV GHIDRA_HOME=/opt/ghidra
@@ -141,6 +147,11 @@ RUN mkdir -p /home/ghidra \
     && chown -R 1000:1000 /app /data /projects /artifacts /home/ghidra /tmp/ghidra-script-cache
 ENV HOME=/home/ghidra
 USER 1000:1000
+
+# Runtime acceptance: the unprivileged worker user must be able to read the
+# precompiled SLEIGH artifact. /opt/ghidra is not writable at runtime, so a
+# missing/unreadable .sla cannot be repaired lazily by the worker.
+RUN test -r /opt/ghidra/Ghidra/Processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.sla
 
 # Expose port
 EXPOSE 8089 8090 8091 8092 8093
