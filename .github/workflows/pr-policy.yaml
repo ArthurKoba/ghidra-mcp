@@ -1,0 +1,19 @@
+name: PR Policy
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  same-repository-head:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject fork/cross-repository PRs
+        env:
+          BASE_REPO: ${{ github.repository }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          test "$BASE_REPO" = "$HEAD_REPO"
