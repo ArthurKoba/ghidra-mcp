@@ -11,19 +11,36 @@ unknowns.
 
 ## Current scope
 
-Version 0.1 establishes the processor model and the instruction forms required
-to replace the previous incorrect MIPS import of the project DSP images:
+The module has moved beyond the original decode-smoke stage. Its current validated scope is the complete local instruction corpus used by the canonical SPHE8202R `srvdsp.bin` wrapper.
+
+Architecture/model contract:
 
 - fixed 24-bit big-endian instruction words;
-- word-addressed program memory;
-- direct data-memory read/write (ADSP-218x instruction type 3);
-- immediate data-register load (type 6);
-- immediate non-data-register load (type 7);
-- unconditional direct JUMP and CALL (type 10, COND=1111);
-- unconditional RTS;
-- NOP.
+- PM is word-addressed with `wordsize=3` and required `alignment=3`;
+- 16-bit DM and IO address spaces;
+- explicit PM / DM / IO separation;
+- compiler/decompiler model with a synthetic `SP` only for ABI/decompiler support;
+- direct and conditional PM flow;
+- explicit resident-PM handoffs that preserve the numeric target without fabricating unavailable resident code;
+- real `CNTR`-controlled semantics for the proven `DO PM:186C UNTIL CE` loop.
 
-The first target regression words are:
+Instruction families exercised and modeled by the canonical corpus:
+
+- type 3 — direct DM read/write;
+- type 4 — ALU/MAC + DM access forms used by the wrapper;
+- type 6 — immediate data-register load;
+- type 7 — immediate non-data-register load;
+- type 9 — arithmetic/logic forms used by the wrapper;
+- type 10 — conditional/unconditional flow and call/jump forms used by the wrapper;
+- type 11 — zero-overhead `DO ... UNTIL CE` setup for the proven corpus sequence;
+- type 15 — immediate shifter form used by the corpus;
+- type 17 — internal register move;
+- type 20 — return form;
+- type 29 — IO-space write form used by the wrapper.
+
+The module remains intentionally named for the Sunplus target. This is **corpus-complete for the recovered SPHE wrapper**, not a claim that the full ADSP-218x ISA or every Sunplus DSP peripheral semantic is implemented.
+
+The first target regression words remain useful smoke vectors:
 
 | Word | Expected decode |
 | --- | --- |
@@ -31,10 +48,6 @@ The first target regression words are:
 | 0x0a000f | RTS |
 | 0x80023a | direct DM read into AR from 0x0023 |
 | 0x80021a | direct DM read into AR from 0x0021 |
-
-These words come from the SPHE8202R audio-DSP behavior corpus. They are used
-as smoke vectors, not as a claim that the complete ADSP-218x ISA has already
-been implemented.
 
 ## Validation boundary
 
@@ -63,3 +76,23 @@ Important Ghidra modeling details:
 - Saved canonical programs carry a small analysis-model revision marker. Revision 2 refreshes only `PM:186B..186C` once so older saved instruction/context state picks up the CE-loop decoder semantics without clearing user names/comments across the whole module.
 
 Acceptance requires the canonical corpus to produce zero undefined words in the 117-word local code region, seed all nine vector handlers as functions, successfully generate decompiler output for all nine functions, and expose the `PM:186C` CE loop as real control flow rather than an opaque userop.
+
+## Upstream contribution handoff
+
+The reusable processor support should eventually be separated from MCP/project-specific automation and contributed to Ghidra proper.
+
+Tracking task: `ArthurKoba/hd-audio-rush-sphe8202r#30`.
+
+Upstream extraction should preserve the processor language/compiler-spec semantics and architecture-level regression coverage, while excluding project-specific auto-import/rebase hooks, canonical action names/comments, saved-project revision hooks, and target firmware blobs unless their provenance/licensing is explicitly approved.
+
+The preferred upstream test strategy is synthetic instruction/regression fixtures covering:
+
+- big-endian 24-bit token mapping;
+- PM addressable-unit behavior;
+- DM/IO access;
+- direct/conditional flow;
+- arithmetic/condition behavior used by the recovered corpus;
+- the proven CE-loop counter/back-edge semantics.
+
+An independent reviewer pass is required before treating the implementation as upstream-ready.
+

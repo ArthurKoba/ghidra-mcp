@@ -12,6 +12,8 @@ Complete version history for the Ghidra MCP Server project.
 
 - Sunplus SPHE audio-DSP packaging now compiles the `.slaspec` to an explicit co-located `.sla`, verifies it in both builder and final runtime stages, and aligns CI with the Docker runtime's Ghidra 12.1.3. This prevents a registered language definition from surviving into an image without a loadable SLEIGH artifact.
 
+- Sunplus SPHE audio-DSP support is now validated beyond decode smoke: the canonical 1128-byte `srvdsp.bin` corpus reaches 117/117 local executable words, 9/9 vector-seeded actions and 9/9 high-level behavior outputs. The language now models the corpus instruction families (types 3/4/6/7/9/10/11/15/17/20/29), real CNTR-controlled `DO ... UNTIL CE` flow, PM word-address conversion, bounded DM-state scaffolding and saved-model refresh. Future extraction of the reusable processor portion for official Ghidra is tracked separately in `ArthurKoba/hd-audio-rush-sphe8202r#30`; MCP/device-specific glue is explicitly out of scope for that upstream delta.
+
 
 - Headless project-session guidance now distinguishes persistent project state from session-local open-program handles. A `Program not found` result after idle release is treated as a reopen condition, not evidence that project analysis was lost.
 - The Docker worker pool is expanded from 2 to 5 workers. Per-worker heap is reduced to 1500 MiB and the container budget is raised to 10 GiB so added concurrency does not simply overcommit the previous 6 GiB limit.
