@@ -57,6 +57,20 @@ The first target regression words remain useful smoke vectors:
 | 0x0d00af | AR = SR1 |
 | 0x18036f | generic JUMP 0x0036 when wrapper context is not enabled |
 
+## Production validation — 2026-10-02
+
+The completed target-corpus extension is present in `ghidra-mcp/main` commit `5570d8c623ee72e2be9f07eb271d1127fb7d297f` and was deployed to the production Analysis backend through Coolify deployment `#296` on 2026-10-02.
+
+Post-deploy checks:
+- production Analysis decoded the previously incomplete AUX entry range with the extended instruction set active;
+- canonical `srvdsp.bin` remained at 117/117 local executable words, 9/9 action nodes and 9/9 high-level behavior views;
+- the saved board project was re-audited after deployment and retained 21/21 named, typed and documented DM state/config slots;
+- AUX/PCM/AC-3/DTS reachable-code acceptance remains zero-gap at 5451/5451, 7787/7787, 10339/10339 and 9651/9651 reached words respectively.
+
+This validates the deployed processor/runtime path for the current target corpus. It does not upgrade corpus coverage into full ADSP-218x compatibility or prove Sunplus DSP clock, cycle budget, memory capacity, peripheral mapping or physical audio-lane ownership.
+
+Board-specific continuation evidence and the current AP1/runtime audio-control contract live in `ArthurKoba/hd-audio-rush-sphe8202r`; keep reusable processor semantics here and target behavior findings in the board repository.
+
 ## Validation boundary
 
 The language source must compile with Ghidra's support/sleigh compiler during
