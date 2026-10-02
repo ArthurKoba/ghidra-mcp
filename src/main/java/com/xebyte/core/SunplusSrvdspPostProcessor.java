@@ -1,5 +1,6 @@
 package com.xebyte.core;
 
+import java.math.BigInteger;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -10,7 +11,9 @@ import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.lang.Register;
 import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.ProgramContext;
 import ghidra.program.model.listing.Program;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
@@ -36,11 +39,15 @@ public final class SunplusSrvdspPostProcessor {
     public static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     public static final int EXPECTED_LOCAL_HANDLERS = 9;
     public static final long DM_STATE_SIZE_BYTES = 0x300L;
-    public static final int ANALYSIS_MODEL_VERSION = 2;
+    public static final int ANALYSIS_MODEL_VERSION = 3;
     private static final String ANALYSIS_OPTIONS = "Sunplus SPHE Audio DSP";
     private static final String MODEL_VERSION_OPTION = "srvdsp.analysis_model_version";
-    private static final long MODEL_REFRESH_FIRST = 0x186bL;
-    private static final long MODEL_REFRESH_LAST = 0x186cL;
+    private static final String WRAPPER_CONTEXT_REGISTER = "srvdsp_wrapper_mode";
+    private static final long[] MODEL_REFRESH_WORDS = {
+        0x1823L, 0x183dL, 0x1842L, 0x1847L, 0x184eL, 0x1853L, 0x1854L,
+        0x1866L, 0x186bL, 0x186cL, 0x186eL, 0x1875L, 0x1878L, 0x1879L,
+        0x188cL, 0x188eL, 0x1890L, 0x1894L
+    };
 
     private SunplusSrvdspPostProcessor() {
     }
@@ -79,6 +86,10 @@ public final class SunplusSrvdspPostProcessor {
             }
 
             if (ensureDmStateBlock(program)) {
+                changed = true;
+            }
+
+            if (ensureSrvdspDecodeContext(program, pm)) {
                 changed = true;
             }
 
@@ -170,6 +181,23 @@ public final class SunplusSrvdspPostProcessor {
         return null;
     }
 
+    private static boolean ensureSrvdspDecodeContext(Program program, AddressSpace pm) throws Exception {
+        ProgramContext context = program.getProgramContext();
+        Register wrapperMode = context.getRegister(WRAPPER_CONTEXT_REGISTER);
+        if (wrapperMode == null) {
+            throw new IllegalStateException(
+                "Sunplus srvdsp wrapper context register is missing: " + WRAPPER_CONTEXT_REGISTER);
+        }
+        Address start = pmWord(pm, PM_BASE);
+        Address end = pmWord(pm, PM_BASE + (EXPECTED_SIZE_BYTES / 3L) - 1L);
+        AddressSet range = new AddressSet(start, end);
+        if (context.hasValueOverRange(wrapperMode, BigInteger.ONE, range)) {
+            return false;
+        }
+        context.setValue(wrapperMode, start, end, BigInteger.ONE);
+        return true;
+    }
+
     private static boolean ensureInstructionModelRevision(
             Program program, AddressSpace pm, TaskMonitor monitor) throws Exception {
         Options options = program.getOptions(ANALYSIS_OPTIONS);
@@ -178,21 +206,18 @@ public final class SunplusSrvdspPostProcessor {
             return false;
         }
 
-        Address start = pmWord(pm, MODEL_REFRESH_FIRST);
-        Address lastStart = pmWord(pm, MODEL_REFRESH_LAST);
-        Address end = lastStart.add(pm.getAddressableUnitSize() - 1L);
         Listing listing = program.getListing();
-        listing.clearCodeUnits(start, end, false);
-
-        DisassembleCommand refresh =
-            new DisassembleCommand(new AddressSet(start, end), null, true);
-        if (!refresh.applyTo(program, monitor)) {
-            throw new IllegalStateException(
-                "Sunplus srvdsp model-refresh disassembly failed: " + refresh.getStatusMsg());
-        }
-        if (listing.getInstructionAt(start) == null || listing.getInstructionAt(lastStart) == null) {
-            throw new IllegalStateException(
-                "Sunplus srvdsp model-refresh did not recreate PM:186B..186C");
+        for (long word : MODEL_REFRESH_WORDS) {
+            Address start = pmWord(pm, word);
+            Address end = start.add(pm.getAddressableUnitSize() - 1L);
+            listing.clearCodeUnits(start, end, false);
+            DisassembleCommand refresh =
+                new DisassembleCommand(new AddressSet(start, end), null, true);
+            if (!refresh.applyTo(program, monitor) || listing.getInstructionAt(start) == null) {
+                throw new IllegalStateException(
+                    "Sunplus srvdsp model-refresh failed at PM:" + Long.toHexString(word) +
+                    ": " + refresh.getStatusMsg());
+            }
         }
         options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION);
         return true;

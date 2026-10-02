@@ -3,6 +3,7 @@
 // handlers occupy PM:0x1820..0x1894.  Resident targets outside this image are
 // intentionally left as external flows.
 
+import java.math.BigInteger;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -11,7 +12,9 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.data.VoidDataType;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.lang.Register;
 import ghidra.program.model.listing.Listing;
+import ghidra.program.model.listing.ProgramContext;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.SourceType;
@@ -25,11 +28,15 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
     private static final long DEFAULT_VECTOR_TARGET = 0x1895L;
     private static final long EXPECTED_SIZE_BYTES = 1128L;
     private static final long DM_STATE_SIZE_BYTES = 0x300L;
-    private static final int ANALYSIS_MODEL_VERSION = 2;
+    private static final int ANALYSIS_MODEL_VERSION = 3;
     private static final String ANALYSIS_OPTIONS = "Sunplus SPHE Audio DSP";
     private static final String MODEL_VERSION_OPTION = "srvdsp.analysis_model_version";
-    private static final long MODEL_REFRESH_FIRST = 0x186bL;
-    private static final long MODEL_REFRESH_LAST = 0x186cL;
+    private static final String WRAPPER_CONTEXT_REGISTER = "srvdsp_wrapper_mode";
+    private static final long[] MODEL_REFRESH_WORDS = {
+        0x1823L, 0x183dL, 0x1842L, 0x1847L, 0x184eL, 0x1853L, 0x1854L,
+        0x1866L, 0x186bL, 0x186cL, 0x186eL, 0x1875L, 0x1878L, 0x1879L,
+        0x188cL, 0x188eL, 0x1890L, 0x1894L
+    };
 
     private AddressSpace pm;
 
@@ -138,6 +145,17 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
         return targets;
     }
 
+    private void ensureSrvdspDecodeContext() throws Exception {
+        ProgramContext context = currentProgram.getProgramContext();
+        Register wrapperMode = context.getRegister(WRAPPER_CONTEXT_REGISTER);
+        if (wrapperMode == null) {
+            throw new AssertionError("Missing wrapper context register: " + WRAPPER_CONTEXT_REGISTER);
+        }
+        Address start = pmWord(EXPECTED_BASE);
+        Address end = pmWord(EXPECTED_BASE + (EXPECTED_SIZE_BYTES / 3L) - 1L);
+        context.setValue(wrapperMode, start, end, BigInteger.ONE);
+    }
+
     private void ensureInstructionModelRevision() throws Exception {
         Options options = currentProgram.getOptions(ANALYSIS_OPTIONS);
         int storedVersion = options.getInt(MODEL_VERSION_OPTION, 0);
@@ -145,24 +163,18 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
             return;
         }
 
-        Address start = pmWord(MODEL_REFRESH_FIRST);
-        Address lastStart = pmWord(MODEL_REFRESH_LAST);
-        Address end = lastStart.add(pm.getAddressableUnitSize() - 1L);
         Listing listing = currentProgram.getListing();
         int tx = currentProgram.startTransaction("Refresh srvdsp processor model");
         boolean commit = false;
         try {
-            listing.clearCodeUnits(start, end, false);
-            for (long off = MODEL_REFRESH_FIRST; off <= MODEL_REFRESH_LAST; off++) {
-                Address address = pmWord(off);
-                if (!disassemble(address)) {
+            for (long word : MODEL_REFRESH_WORDS) {
+                Address start = pmWord(word);
+                Address end = start.add(pm.getAddressableUnitSize() - 1L);
+                listing.clearCodeUnits(start, end, false);
+                if (!disassemble(start) || listing.getInstructionAt(start) == null) {
                     throw new AssertionError(
-                        "Unable to refresh srvdsp instruction model at " + address);
+                        "Unable to refresh srvdsp instruction model at " + start);
                 }
-            }
-            if (listing.getInstructionAt(start) == null || listing.getInstructionAt(lastStart) == null) {
-                throw new AssertionError(
-                    "srvdsp model refresh did not recreate PM:186B..186C");
             }
             options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION);
             commit = true;
@@ -224,6 +236,7 @@ public class SunplusSrvdspAnalyze extends GhidraScript {
 
         ensureImageBase();
         ensureDmStateBlock();
+        ensureSrvdspDecodeContext();
         Set<Long> targets = collectHandlerTargets();
         if (targets.size() != 9) {
             throw new AssertionError("Expected 9 local vector handlers, got " + targets);

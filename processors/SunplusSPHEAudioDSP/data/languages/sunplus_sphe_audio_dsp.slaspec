@@ -41,8 +41,14 @@ define register offset=0x0d0 size=1 [ AZF ANF AVF ACF MVF CEF ];
 # Decoder-only context used for the proven srvdsp single-instruction
 # DO ... UNTIL CE loop. This is not an architectural DSP register.
 define register offset=0x0e0 size=4 [ DSPCTX ];
+
+# RTI restores architectural status-stack state in addition to the saved PC.
+# The detailed status-stack storage is not yet modeled; keep that side effect
+# explicit instead of aliasing RTI to RTS.
+define pcodeop dsp_rti_restore_status;
 define context DSPCTX
     srvdsp_ce_loop_end=(0,0) noflow
+    srvdsp_wrapper_mode=(1,1) noflow
 ;
 
 define token inst24(24) endian = big
@@ -450,6 +456,13 @@ macro alu_flags_logic(r) {
     alu_flags_add(oldx, 1:2, AR);
 }
 
+:AR "=" ALUX "- 1" is type9=4 & z18=0 & amf5=23 & yy2=0 & ALUX & cc2=0 & bo2=1 & cond4=15
+{
+    local oldx:2 = ALUX;
+    AR = oldx - 1;
+    alu_flags_sub(oldx, 1:2, AR);
+}
+
 :AF "=" ALUX "+ 1" is type9=4 & z18=1 & amf5=19 & yy2=0 & ALUX & cc2=0 & bo2=1 & cond4=15
 {
     local oldx:2 = ALUX;
@@ -500,33 +513,33 @@ macro resident_tail(target) {
 }
 
 # Unconditional resident targets observed in the srvdsp corpus.
-:JUMP_RESIDENT_00E0 is type10=3 & call18=0 & addr14=0x00e0 & cond4=15 { resident_tail(0x00e0:2); }
-:JUMP_RESIDENT_0036 is type10=3 & call18=0 & addr14=0x0036 & cond4=15 { resident_tail(0x0036:2); }
-:JUMP_RESIDENT_0539 is type10=3 & call18=0 & addr14=0x0539 & cond4=15 { resident_tail(0x0539:2); }
-:JUMP_RESIDENT_05A4 is type10=3 & call18=0 & addr14=0x05a4 & cond4=15 { resident_tail(0x05a4:2); }
-:JUMP_RESIDENT_08ED is type10=3 & call18=0 & addr14=0x08ed & cond4=15 { resident_tail(0x08ed:2); }
-:JUMP_RESIDENT_0EBB is type10=3 & call18=0 & addr14=0x0ebb & cond4=15 { resident_tail(0x0ebb:2); }
-:JUMP_RESIDENT_04BC is type10=3 & call18=0 & addr14=0x04bc & cond4=15 { resident_tail(0x04bc:2); }
-:JUMP_RESIDENT_092C is type10=3 & call18=0 & addr14=0x092c & cond4=15 { resident_tail(0x092c:2); }
-:JUMP_RESIDENT_0398 is type10=3 & call18=0 & addr14=0x0398 & cond4=15 { resident_tail(0x0398:2); }
-:JUMP_RESIDENT_10C5 is type10=3 & call18=0 & addr14=0x10c5 & cond4=15 { resident_tail(0x10c5:2); }
-:JUMP_RESIDENT_0231 is type10=3 & call18=0 & addr14=0x0231 & cond4=15 { resident_tail(0x0231:2); }
+:JUMP_RESIDENT_00E0 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x00e0 & cond4=15 { resident_tail(0x00e0:2); }
+:JUMP_RESIDENT_0036 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0036 & cond4=15 { resident_tail(0x0036:2); }
+:JUMP_RESIDENT_0539 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=15 { resident_tail(0x0539:2); }
+:JUMP_RESIDENT_05A4 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x05a4 & cond4=15 { resident_tail(0x05a4:2); }
+:JUMP_RESIDENT_08ED is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x08ed & cond4=15 { resident_tail(0x08ed:2); }
+:JUMP_RESIDENT_0EBB is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0ebb & cond4=15 { resident_tail(0x0ebb:2); }
+:JUMP_RESIDENT_04BC is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x04bc & cond4=15 { resident_tail(0x04bc:2); }
+:JUMP_RESIDENT_092C is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x092c & cond4=15 { resident_tail(0x092c:2); }
+:JUMP_RESIDENT_0398 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0398 & cond4=15 { resident_tail(0x0398:2); }
+:JUMP_RESIDENT_10C5 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x10c5 & cond4=15 { resident_tail(0x10c5:2); }
+:JUMP_RESIDENT_0231 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0231 & cond4=15 { resident_tail(0x0231:2); }
 
 # Conditional resident handoffs used by srvdsp.
-:"IF GT JUMP_RESIDENT_0539" is type10=3 & call18=0 & addr14=0x0539 & cond4=2
+:"IF GT JUMP_RESIDENT_0539" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=2
 {
     local gt:1 = (AZF == 0) && (ANF == AVF);
     if (gt == 0) goto inst_next;
     resident_tail(0x0539:2);
 }
 
-:"IF LT JUMP_RESIDENT_0539" is type10=3 & call18=0 & addr14=0x0539 & cond4=4
+:"IF LT JUMP_RESIDENT_0539" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     resident_tail(0x0539:2);
 }
 
-:"IF NE JUMP_RESIDENT_0D04" is type10=3 & call18=0 & addr14=0x0d04 & cond4=1
+:"IF NE JUMP_RESIDENT_0D04" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0d04 & cond4=1
 {
     if (AZF != 0) goto inst_next;
     resident_tail(0x0d04:2);
@@ -540,6 +553,11 @@ macro resident_tail(target) {
 :CALL JumpAddr is type10=3 & call18=1 & cond4=15 & JumpAddr
 {
     call JumpAddr;
+}
+
+:"IF EQ JUMP" JumpAddr is type10=3 & call18=0 & cond4=0 & JumpAddr
+{
+    if (AZF != 0) goto JumpAddr;
 }
 
 :"IF NE JUMP" JumpAddr is type10=3 & call18=0 & cond4=1 & JumpAddr
@@ -571,7 +589,7 @@ macro resident_tail(target) {
 # unsupported until observed in corpus.
 # -----------------------------------------------------------------------------
 
-:"DO" LoopAddr "UNTIL CE" is type11=5 & loop14=0x186c & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=1 & type11=5 & loop14=0x186c & term4=14 & LoopAddr
     [ srvdsp_ce_loop_end=1; globalset(LoopAddr, srvdsp_ce_loop_end); ]
 {
 }
@@ -588,6 +606,15 @@ macro resident_tail(target) {
     SR1 = res[16,16];
 }
 
+:SR "=" "LSHIFT" ShiftX "BY -10 (HI)" is type15=0x1e & sf4=0 & ShiftX & sexp8=0xf6
+{
+    local src:4 = zext(ShiftX);
+    local high:4 = src << 16;
+    local res:4 = high >> 10;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
 # -----------------------------------------------------------------------------
 # Type 17 internal data-register move.  General register mapping is deferred;
 # srvdsp uses exactly AY0 = SR0 at PM:1863.
@@ -598,12 +625,23 @@ macro resident_tail(target) {
     AY0 = SR0;
 }
 
+:AR "=" "SR1" is type17=0x0d0 & dst_rgp=0 & src_rgp=0 & dst_reg=10 & src_reg=15
+{
+    AR = SR1;
+}
+
 # -----------------------------------------------------------------------------
 # Type 20 returns used by srvdsp.
 # -----------------------------------------------------------------------------
 
 :RTS is ret19=0x5000 & rettype=0 & cond4=15
 {
+    return [PCSTACKTOP];
+}
+
+:RTI is ret19=0x5000 & rettype=1 & cond4=15
+{
+    dsp_rti_restore_status();
     return [PCSTACKTOP];
 }
 
