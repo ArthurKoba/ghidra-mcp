@@ -11,7 +11,7 @@ unknowns.
 
 ## Current scope
 
-The module has moved beyond the original decode-smoke stage. Its current validated scope is the complete local instruction corpus used by the canonical SPHE8202R `srvdsp.bin` wrapper plus a small, target-derived codec-profile extension set. The codec-profile work is intentionally incremental: the exercised AUX entry ranges now decode completely, but full codec-program coverage is not claimed.
+The module has moved beyond the original decode-smoke stage. Its validated scope now includes the complete local instruction corpus used by the canonical SPHE8202R `srvdsp.bin` wrapper plus every instruction word reached by vector-seeded native control flow in the extracted AUX, PCM, AC-3 and DTS codec profiles used for this target. This is reachable-code coverage, not a claim that every 24-bit word in each profile is executable code or that the entire ADSP-218x ISA is implemented.
 
 Architecture/model contract:
 
@@ -38,9 +38,9 @@ Instruction families exercised and modeled by the canonical corpus:
 - type 20 — RTS plus codec-observed RTI, with RTI status restoration kept distinct through an explicit userop until the architectural status stack is modeled;
 - type 29 — IO-space write form used by the wrapper.
 
-The codec-profile extension additionally covers target-observed `IF EQ JUMP`, `AR = ALUX - 1`, `SR = LSHIFT ... BY -10 (HI)`, and `AR = SR1` forms.
+The codec-profile extension now covers the reachable arithmetic/MAC, parallel data/PM/DM access, shifter, stack/mode, direct/indirect flow and internal-register forms exercised by the four extracted decoder profiles. Wrapper-only resident handoffs remain context-scoped. `NEG`/`POS` use the architectural AS input-sign state produced by ABS rather than being approximated through the ALU result-negative flag.
 
-The module remains intentionally named for the Sunplus target. This is **corpus-complete for the recovered SPHE wrapper** plus a verified codec-entry extension, not a claim that the full ADSP-218x ISA, whole codec profiles, or every Sunplus DSP peripheral semantic is implemented.
+The module remains intentionally named for the Sunplus target. It is **corpus-complete for the recovered SPHE wrapper and zero-gap for the currently reachable control-flow corpus of the four extracted codec profiles**, not a claim that the full ADSP-218x ISA, every word in the profile images, or every Sunplus DSP peripheral semantic is implemented.
 
 The first target regression words remain useful smoke vectors:
 
@@ -66,9 +66,14 @@ SunplusSPHEAudioDSP:BE:16:default and checking the known regression words.
 
 Do not use this module to infer Sunplus-specific DM width, DSP clock, PM/DM
 capacity, coefficient precision, or peripheral mapping. Those remain target behavior-analysis
-questions. Target-derived AUX validation currently covers PM:0000..0022 (35/35 words)
-and PM:0024..0043 (32/32 words); this is a bounded entry-range acceptance result,
-not full-profile executable coverage.
+questions. Current vector-seeded reachable-code acceptance over the preserved target profiles is:
+
+- AUX: 5451 / 5451 reached words decoded, 0 gaps;
+- PCM: 7787 / 7787, 0 gaps;
+- AC-3: 10339 / 10339, 0 gaps;
+- DTS: 9651 / 9651, 0 gaps.
+
+The traversal follows decoded fallthrough and direct-flow edges from the observed vector seeds and stops at unsupported words. It deliberately does not treat unrelated coefficient/data regions as executable coverage. The bounded linear corpus scanner remains available for decoder-development diagnostics, but its output must not be interpreted as a code-completeness percentage.
 
 ## srvdsp analysis contract
 

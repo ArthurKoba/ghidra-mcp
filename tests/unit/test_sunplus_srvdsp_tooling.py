@@ -9,6 +9,8 @@ POST = ROOT / "src" / "main" / "java" / "com" / "xebyte" / "core" / "SunplusSrvd
 ANALYZE = ROOT / "ghidra_scripts" / "SunplusSrvdspAnalyze.java"
 ACCEPT = ROOT / "ghidra_scripts" / "SunplusSrvdspAcceptance.java"
 SMOKE = ROOT / "ghidra_scripts" / "SunplusDSPDecodeSmoke.java"
+CORPUS_SCAN = ROOT / "ghidra_scripts" / "SunplusCodecCorpusGapScan.java"
+REACH_SCAN = ROOT / "ghidra_scripts" / "SunplusCodecReachableScan.java"
 
 
 def test_sleigh_declares_big_endian_24bit_token_and_srvdsp_families() -> None:
@@ -31,11 +33,29 @@ def test_sleigh_declares_big_endian_24bit_token_and_srvdsp_families() -> None:
         ':"IF GT JUMP" JumpAddr',
         ':"IF LT JUMP" JumpAddr',
         ':"DO" LoopAddr "UNTIL CE"',
-        ':SR "=" "ASHIFT" ShiftX "BY 4"',
-        ':SR "=" "LSHIFT" ShiftX "BY -10 (HI)"',
-        ':AY0 "=" "SR0"',
-        ':AR "=" "SR1"',
+        ':SR "=" "ASHIFT" ShiftX "BY" sexp8 "(HI)"',
+        ':SR "=" "ASHIFT" ShiftX "BY" sexp8 "(LO)"',
+        ':SR "=" "LSHIFT" ShiftX "BY" sexp8 "(HI)"',
+        ':SR "=" "LSHIFT" ShiftX "BY" sexp8 "(LO)"',
+        ':"" IntDst "=" IntSrc',
         ':"IF NE RTS"',
+        ':AF "=" ALUX "-" ALUY',
+        ':ENA_INTS',
+        ':"IF EQ RTS"',
+        ':"IF GE RTS"',
+        ':"IF LT" "AR" "=" ALUX "+" ALUY',
+        ':"IF GE JUMP" JumpAddr',
+        ':"IF EQ CALL" JumpAddr',
+        ':SR "=" "ASHIFT" ShiftX "BY" sexp8 "(HI)"',
+        ':SR "=" "ASHIFT" ShiftX "BY" sexp8 "(LO)"',
+        ':SAT_MR is whole24=0x050000',
+        ':IDLE is whole24=0x028000',
+        ':NONE "=" ALUX "-" ALUY',
+        ':NONE "=" ALUX "+" ALUY',
+        ':AR "=" ALUX "+" ALUY "," DReg4 "=" DReg',
+        ':AF "=" ALUX "-" ALUY "," DReg4 "=" DReg',
+        ':"" DReg4 "=" "PM(" DagI "," DagM ")"',
+        ':"PM(" DagI "," DagM ")" "=" DReg4',
         ":RTI",
         ':IOWRITE ioaddr, IODReg',
     ]
@@ -91,9 +111,15 @@ def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     assert "globalset(LoopAddr, srvdsp_ce_loop_end)" in text
     assert "CNTR = CNTR - 1" in text
     assert "if (CNTR != 0) goto inst_start" in text
+    assert "ASF" in text
+    assert ':"IF NEG JUMP" JumpAddr' in text
+    assert "if (ASF != 0) goto JumpAddr" in text
+    assert ':"IF POS JUMP" JumpAddr' in text
+    assert "if (ASF == 0) goto JumpAddr" in text
     assert "srvdsp_wrapper_mode=(1,1) noflow" in text
     assert "srvdsp_wrapper_mode=1" in text
-    assert "dsp_do_until" not in text
+    assert "define pcodeop dsp_do_until_ce" in text
+    assert 'srvdsp_wrapper_mode=0 & type11=5' in text
     assert "PcodeOp.INT_SUB" in accept
     assert "PcodeOp.CBRANCH" in accept
     assert 'contains("dsp_do_until")' in accept
@@ -147,3 +173,53 @@ def test_decode_smoke_covers_codec_profile_extension_words() -> None:
         assert expected in smoke
     assert "19820f0a000f80023a80021a0a001f18025022e21f0f02f60d00af18036f" in workflow
     assert "bytes.fromhex" in workflow
+
+
+def test_codec_profile_extension_covers_observed_misc_and_multifunction_forms() -> None:
+    text = SLASPEC.read_text()
+    for marker in (
+        ':"IF LT RTS"',
+        ':"IF GT RTS"',
+        ':DIS_G_MODE is whole24=0x0c0080',
+        ':DIS_TIMER is whole24=0x0c8000',
+        ':DIS_M_MODE is whole24=0x0c2000',
+        ':ENA_AR_SAT is whole24=0x0c0c00',
+        ':DIS_AR_SAT is whole24=0x0c0800',
+        ':ENA_M_MODE is whole24=0x0c3000',
+        ':ENA_TIMER is whole24=0x0cc000',
+        ':"MODIFY(" ModI "," ModM ")"',
+        ':"POP STS, POP CNTR, POP PC, POP LOOP" is whole24=0x04001f',
+        ':SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" DReg',
+        ':SR "=" "LSHIFT" ShiftX "(LO)"',
+        ':SR "=" "SR OR LSHIFT" ShiftX "(LO)"',
+        ':AR "=" ALUX "+" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")"',
+        ':AR "=" ALUY "- 1," DReg4 "=" "DM(" DagI "," DagM ")"',
+        ':"MR = MR + MX0 * 0 (SS)"',
+    ):
+        assert marker in text, marker
+    # Type-8 NONE encodings update status without fabricating an AR/AF write.
+    assert ':NONE "=" ALUX "+" ALUY' in text
+    assert ':NONE "=" ALUX "-" ALUY' in text
+
+
+def test_codec_corpus_gap_scanner_is_bounded_and_reports_explicit_gaps() -> None:
+    text = CORPUS_SCAN.read_text()
+    assert 'requested > 0x4000L' in text
+    assert 'monitor.isCancelled()' in text
+    assert 'memory.contains(address)' in text
+    assert 'memory.contains(address.add(2))' in text
+    assert 'memory.getBytes(address, raw)' in text
+    assert 'trailing_bytes=' in text
+    assert 'SUNPLUS_CORPUS_SCAN' in text
+    assert 'println("GAP "' in text
+
+
+def test_codec_reachable_scanner_follows_native_flow_and_reports_gaps() -> None:
+    text = REACH_SCAN.read_text()
+    assert 'requested > 0x4000L' not in text
+    assert 'maxWords > 0x4000L' in text
+    assert 'monitor.isCancelled()' in text
+    assert 'ins.getFallThrough()' in text
+    assert 'ins.getFlows()' in text
+    assert 'SUNPLUS_REACHABLE_SCAN' in text
+    assert 'println("GAP "' in text
