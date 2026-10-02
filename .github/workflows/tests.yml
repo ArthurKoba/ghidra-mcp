@@ -65,7 +65,7 @@ jobs:
     - name: Instantiate Sunplus SPHE audio-DSP language
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
-        python -c "from pathlib import Path; Path('/tmp/sunplus-sphe-smoke.bin').write_bytes(bytes.fromhex('19820f0a000f80023a80021a0a001f18025022e21f0f02f60d00af18036f'))"
+        python -c "from pathlib import Path; Path('/tmp/sunplus-sphe-smoke.bin').write_bytes(bytes.fromhex('19820f0a000f80023a80021a0a001f18025022e21f0f02f60d00af18036f0400400400600a00000a000526ea0f226a041814451c0e200500000280000f27f80f30f82ae0aa2a60412ee2ca5000a05800c00c30000cc00009001004001f1012420e1a0f73081d62620e21180f'))"
         mkdir -p /tmp/sunplus-sphe-smoke-projects
         "$GHIDRA_DIR/support/analyzeHeadless" \
           /tmp/sunplus-sphe-smoke-projects sunplus-sphe-smoke \
