@@ -134,7 +134,7 @@ def test_srvdsp_processor_model_revision_refresh_is_bounded() -> None:
 
 def test_decode_smoke_covers_codec_profile_extension_words() -> None:
     smoke = SMOKE.read_text()
-    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
     for word, expected in (
         ("0x0A001F", "RTI"),
         ("0x180250", "IF EQ JUMP"),
