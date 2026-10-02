@@ -4,6 +4,12 @@
 //   0x0A000F -> RTS
 //   0x80023A -> AR = DM($0023)
 //   0x80021A -> AR = DM($0021)
+//   0x0A001F -> RTI
+//   0x180250 -> IF EQ JUMP $0025
+//   0x22E21F -> AR = AR - 1
+//   0x0F02F6 -> SR = LSHIFT AR BY -10 (HI)
+//   0x0D00AF -> AR = SR1
+//   0x18036F -> JUMP $0036 (must stay generic outside srvdsp context)
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
@@ -31,6 +37,15 @@ public class SunplusDSPDecodeSmoke extends GhidraScript {
             throw new AssertionError(
                 "Expected " + expected + " at " + instruction.getAddress() +
                 ", got " + actual + " (" + instruction + ")");
+        }
+    }
+
+    private void requireText(Instruction instruction, String expectedFragment) {
+        String actual = instruction.toString();
+        if (!actual.contains(expectedFragment)) {
+            throw new AssertionError(
+                "Expected text containing '" + expectedFragment + "' at " +
+                instruction.getAddress() + ", got: " + actual);
         }
     }
 
@@ -71,6 +86,23 @@ public class SunplusDSPDecodeSmoke extends GhidraScript {
         requireMnemonic(decode(1), "RTS");
         requireDmRead(decode(2), 0x23L);
         requireDmRead(decode(3), 0x21L);
+        requireMnemonic(decode(4), "RTI");
+        requireText(decode(5), "IF EQ JUMP");
+        requireText(decode(6), "AR - 1");
+        requireText(decode(7), "LSHIFT AR BY -10 (HI)");
+        requireText(decode(8), "AR = SR1");
+
+        Instruction genericResidentCollision = decode(9);
+        requireMnemonic(genericResidentCollision, "JUMP");
+        Address[] genericFlows = genericResidentCollision.getFlows();
+        long genericUnitSize = genericFlows.length == 0 ? 1 :
+            genericFlows[0].getAddressSpace().getAddressableUnitSize();
+        long genericTarget = genericFlows.length == 0 ? -1 :
+            genericFlows[0].getOffset() / genericUnitSize;
+        if (genericFlows.length != 1 || genericTarget != 0x36L) {
+            throw new AssertionError(
+                "Expected generic local JUMP target PM:0036, got: " + genericResidentCollision);
+        }
 
         println("SUNPLUS_DSP_DECODE_SMOKE=PASS");
     }

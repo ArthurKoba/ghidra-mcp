@@ -11,6 +11,7 @@ import ghidra.framework.options.Options;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSpace;
 import ghidra.program.model.listing.Function;
+import ghidra.program.model.lang.Register;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.pcode.PcodeOp;
@@ -45,9 +46,24 @@ public class SunplusSrvdspAcceptance extends GhidraScript {
 
         Options srvdspOptions = currentProgram.getOptions("Sunplus SPHE Audio DSP");
         int modelVersion = srvdspOptions.getInt("srvdsp.analysis_model_version", 0);
-        if (modelVersion < 2) {
+        if (modelVersion < 3) {
             throw new AssertionError(
                 "srvdsp analysis model revision not applied: " + modelVersion);
+        }
+
+        Register wrapperMode = currentProgram.getProgramContext().getRegister("srvdsp_wrapper_mode");
+        if (wrapperMode == null) {
+            throw new AssertionError("srvdsp wrapper context register missing");
+        }
+        Address wrapperProbe = pm.getAddress(0x186eL * pm.getAddressableUnitSize());
+        if (!java.math.BigInteger.ONE.equals(
+                currentProgram.getProgramContext().getValue(wrapperMode, wrapperProbe, false))) {
+            throw new AssertionError("srvdsp wrapper context not applied at " + wrapperProbe);
+        }
+        Instruction residentJump = currentProgram.getListing().getInstructionAt(wrapperProbe);
+        if (residentJump == null || !residentJump.getMnemonicString().startsWith("JUMP_RESIDENT")) {
+            throw new AssertionError(
+                "Expected srvdsp resident handoff at " + wrapperProbe + ", got " + residentJump);
         }
 
         AddressSpace dm = currentProgram.getAddressFactory().getAddressSpace("DM");

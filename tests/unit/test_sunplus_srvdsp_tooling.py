@@ -25,13 +25,18 @@ def test_sleigh_declares_big_endian_24bit_token_and_srvdsp_families() -> None:
         ":DMWRITE DagI, DagM, DReg4",
         ':AR "=" ALUX "-" ALUY',
         ':MR "=" MACX "*" MACY',
+        ':AR "=" ALUX "- 1"',
+        ':"IF EQ JUMP" JumpAddr',
         ':"IF NE JUMP" JumpAddr',
         ':"IF GT JUMP" JumpAddr',
         ':"IF LT JUMP" JumpAddr',
         ':"DO" LoopAddr "UNTIL CE"',
         ':SR "=" "ASHIFT" ShiftX "BY 4"',
+        ':SR "=" "LSHIFT" ShiftX "BY -10 (HI)"',
         ':AY0 "=" "SR0"',
+        ':AR "=" "SR1"',
         ':"IF NE RTS"',
+        ":RTI",
         ':IOWRITE ioaddr, IODReg',
     ]
     for marker in required_markers:
@@ -86,6 +91,8 @@ def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     assert "globalset(LoopAddr, srvdsp_ce_loop_end)" in text
     assert "CNTR = CNTR - 1" in text
     assert "if (CNTR != 0) goto inst_start" in text
+    assert "srvdsp_wrapper_mode=(1,1) noflow" in text
+    assert "srvdsp_wrapper_mode=1" in text
     assert "dsp_do_until" not in text
     assert "PcodeOp.INT_SUB" in accept
     assert "PcodeOp.CBRANCH" in accept
@@ -113,11 +120,30 @@ def test_srvdsp_processor_model_revision_refresh_is_bounded() -> None:
     analyze = ANALYZE.read_text()
     accept = ACCEPT.read_text()
     for text in (post, analyze):
-        assert "ANALYSIS_MODEL_VERSION = 2" in text
+        assert "ANALYSIS_MODEL_VERSION = 3" in text
         assert 'MODEL_VERSION_OPTION = "srvdsp.analysis_model_version"' in text
-        assert "MODEL_REFRESH_FIRST = 0x186bL" in text
-        assert "MODEL_REFRESH_LAST = 0x186cL" in text
+        assert "MODEL_REFRESH_WORDS" in text
+        assert "WRAPPER_CONTEXT_REGISTER" in text
         assert "clearCodeUnits(start, end, false)" in text
         assert "options.setInt(MODEL_VERSION_OPTION, ANALYSIS_MODEL_VERSION)" in text
     assert 'getOptions("Sunplus SPHE Audio DSP")' in accept
     assert 'getInt("srvdsp.analysis_model_version", 0)' in accept
+    assert 'getRegister("srvdsp_wrapper_mode")' in accept
+    assert 'startsWith("JUMP_RESIDENT")' in accept
+
+
+def test_decode_smoke_covers_codec_profile_extension_words() -> None:
+    smoke = SMOKE.read_text()
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text()
+    for word, expected in (
+        ("0x0A001F", "RTI"),
+        ("0x180250", "IF EQ JUMP"),
+        ("0x22E21F", "AR = AR - 1"),
+        ("0x0F02F6", "LSHIFT AR BY -10 (HI)"),
+        ("0x0D00AF", "AR = SR1"),
+        ("0x18036F", "JUMP $0036"),
+    ):
+        assert word in smoke
+        assert expected in smoke
+    assert "19820f0a000f80023a80021a0a001f18025022e21f0f02f60d00af18036f" in workflow
+    assert "bytes.fromhex" in workflow
