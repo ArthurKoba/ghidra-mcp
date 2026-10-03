@@ -486,12 +486,14 @@ async def test_recover_worker_cancels_running_and_queued_operations(fake_workers
     monkeypatch.setattr(
         worker_control,
         "_request_worker_restart",
-        lambda index, url: (restarts.append((index, url)), fake_workers.__setitem__(url, None), "supervisor-sigkill")[
-            -1
-        ],
+        lambda index, url: (
+            restarts.append((index, url)),
+            fake_workers.__setitem__(url, None),
+            ("supervisor-sigkill", 100),
+        )[-1],
     )
-    health = iter([False, True])
-    monkeypatch.setattr(worker_control, "_worker_healthy", lambda _url: next(health))
+    monkeypatch.setattr(worker_control, "_read_worker_pid", lambda _index: 101)
+    monkeypatch.setattr(worker_control, "_worker_healthy", lambda _url: True)
 
     async def no_sleep(_seconds: float) -> None:
         return None

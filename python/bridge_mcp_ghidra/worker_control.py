@@ -119,8 +119,29 @@ def _worker_control_fifo() -> Path:
     )
 
 
-def _request_worker_restart(worker_index: int, worker_url: str) -> str:
+def _worker_pid_file(worker_index: int) -> Path:
+    root = Path(
+        os.getenv(
+            "GHIDRA_MCP_WORKER_PID_DIR",
+            "/data/bridge/workers",
+        )
+    )
+    return root / f"worker-{worker_index}.pid"
+
+
+def _read_worker_pid(worker_index: int) -> int | None:
+    try:
+        raw = _worker_pid_file(worker_index).read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not raw.isdigit():
+        return None
+    return int(raw)
+
+
+def _request_worker_restart(worker_index: int, worker_url: str) -> tuple[str, int | None]:
     fifo = _worker_control_fifo()
+    previous_pid = _read_worker_pid(worker_index)
     try:
         mode = fifo.stat().st_mode
     except OSError:
@@ -131,7 +152,7 @@ def _request_worker_restart(worker_index: int, worker_url: str) -> str:
             os.write(fd, f"restart {worker_index}\n".encode("ascii"))
         finally:
             os.close(fd)
-        return "supervisor-sigkill"
+        return "supervisor-sigkill", previous_pid
 
     # Non-Docker/manual fallback where no shared supervisor control FIFO exists.
     project_sessions._request(
@@ -140,7 +161,7 @@ def _request_worker_restart(worker_index: int, worker_url: str) -> str:
         "/exit_ghidra",
         timeout=1,
     )
-    return "native-exit"
+    return "native-exit", previous_pid
 
 
 def _worker_healthy(worker_url: str) -> bool:
@@ -183,21 +204,26 @@ async def recover_worker(
     )
     await state.run_in_worker(_reset_slot_after_cancel, worker_url)
 
-    restart_method = await state.run_in_worker(
+    restart_method, previous_pid = await state.run_in_worker(
         _request_worker_restart,
         worker_index,
         worker_url,
     )
 
-    # Do not accept the old JVM as recovered. Observe the port go down once,
-    # then require the replacement JVM to become healthy within the budget.
+    # Supervisor-managed Docker recovery is identified by PID generation, not
+    # a fleeting closed-port window that can be missed during a very fast restart.
     observed_down = False
+    observed_new_pid = restart_method != "supervisor-sigkill"
     deadline = started + budget
     while time.monotonic() < deadline:
+        if restart_method == "supervisor-sigkill" and not observed_new_pid:
+            current_pid = await state.run_in_worker(_read_worker_pid, worker_index)
+            observed_new_pid = current_pid is not None and previous_pid is not None and current_pid != previous_pid
         healthy = await state.run_in_worker(_worker_healthy, worker_url)
-        if not healthy:
+        if restart_method != "supervisor-sigkill" and not healthy:
             observed_down = True
-        elif observed_down:
+        generation_changed = observed_new_pid or observed_down
+        if healthy and generation_changed:
             status = await state.run_in_worker(
                 _finish_recovery,
                 worker_index,
