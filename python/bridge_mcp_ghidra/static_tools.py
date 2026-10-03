@@ -46,6 +46,7 @@ def _list_instances_sync() -> str:
 
     return json.dumps({"instances": [_summarize_instance(i) for i in instances]}, indent=2)
 
+
 @mcp.tool(name="list_instances")
 async def _list_instances_tool() -> str:
     return await state.run_in_worker(_list_instances_sync)
@@ -53,7 +54,6 @@ async def _list_instances_tool() -> str:
 
 def list_instances() -> str:
     return _list_instances_sync()
-
 
 
 @mcp.tool()
@@ -131,6 +131,29 @@ async def set_worker_enabled(
             worker_index,
             enabled,
             close_project,
+        )
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def clear_worker_queue(worker_index: int) -> str:
+    """Cancel queued bridge requests waiting for one worker, preserving its active call."""
+    try:
+        result = await worker_control.clear_worker_queue(worker_index)
+        return json.dumps(result, indent=2)
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def recover_worker(worker_index: int, timeout_seconds: float = 30.0) -> str:
+    """Emergency recovery: cancel active/queued calls and restart one headless worker JVM."""
+    try:
+        result = await worker_control.recover_worker(
+            worker_index,
+            timeout_seconds=timeout_seconds,
         )
         return json.dumps(result, indent=2)
     except project_sessions.ProjectSessionError as exc:
@@ -239,6 +262,7 @@ def _load_groups_sync(group_names: list[str]) -> list[str]:
     for name in group_names:
         loaded.extend(registry._load_group(name))
     return loaded
+
 
 @mcp.tool()
 def list_tool_groups() -> str:
@@ -556,7 +580,6 @@ async def import_file(
     finally:
         if not keep_lease_for_poll:
             await project_sessions.release_project_operation(lease)
-
 
 
 def _auto_connect() -> bool:

@@ -103,6 +103,8 @@ MANAGEMENT_TOOL_NAMES = {
     "set_project_idle_timeout",
     "project_session_settings",
     "set_worker_enabled",
+    "clear_worker_queue",
+    "recover_worker",
     "list_tool_groups",
     "load_tool_group",
     "unload_tool_group",

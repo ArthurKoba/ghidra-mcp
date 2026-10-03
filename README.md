@@ -963,6 +963,7 @@ On Windows hosts where the bridge's WinDbg debugger proxy is active (`GHIDRA_DEB
 Defined in the Python bridge itself (instance discovery, tool-group management); always available even before a Ghidra connection. The bridge also proxies 22 `debugger_*` WinDbg tools when `GHIDRA_DEBUGGER_URL` points at the standalone debugger server.
 
 - `check_tools` - Report which tools are currently registered and callable
+- `clear_worker_queue` - clear_worker_queue
 - `close_project` - Close and release the worker session for project_id
 - `connect_instance` - Resolve a project selector and activate its isolated worker session
 - `create_project` - Create a local project and return its stable project_id
@@ -975,6 +976,7 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `open_project` - Activate an isolated worker session for project_id
 - `project_session_info` - Inspect worker/session state for one project_id
 - `project_session_settings` - project_session_settings
+- `recover_worker` - recover_worker
 - `release_project_session` - Release an idle project worker session
 - `search_tools` - Search the full tool catalog by keyword
 - `set_project_idle_timeout` - set_project_idle_timeout

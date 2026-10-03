@@ -8,7 +8,6 @@ import pytest
 from bridge_mcp_ghidra import project_sessions
 from bridge_mcp_ghidra import worker_control
 
-
 PROJECTS = [
     {"name": "alpha", "path": "/projects/alpha.gpr"},
     {"name": "beta", "path": "/projects/beta.gpr"},
@@ -49,26 +48,25 @@ def fake_workers():
             return json.dumps(PROJECTS), 200
         if endpoint == "/get_project_info":
             name = state[url]
-            return json.dumps(
-                {
-                    "data": {
-                        "has_project": name is not None,
-                        "project_name": name or "",
+            return (
+                json.dumps(
+                    {
+                        "data": {
+                            "has_project": name is not None,
+                            "project_name": name or "",
+                        }
                     }
-                }
-            ), 200
+                ),
+                200,
+            )
         if endpoint == "/open_project":
             path = json_data["path"]
             state[url] = by_path[path]
-            return json.dumps(
-                {"data": {"success": True, "project": state[url]}}
-            ), 200
+            return json.dumps({"data": {"success": True, "project": state[url]}}), 200
         if endpoint == "/close_project":
             closed = state[url]
             state[url] = None
-            return json.dumps(
-                {"data": {"success": True, "closed": closed}}
-            ), 200
+            return json.dumps({"data": {"success": True, "closed": closed}}), 200
         raise AssertionError(f"unexpected request: {method} {endpoint}")
 
     with patch.object(project_sessions.transport, "do_request", side_effect=do_request):
@@ -349,18 +347,14 @@ def test_catalog_aggregates_worker_storage_and_routes_to_visible_worker():
             return json.dumps(worker_projects[url]), 200
         if endpoint == "/get_project_info":
             name = worker_state[url]
-            return json.dumps(
-                {"data": {"has_project": name is not None, "project_name": name or ""}}
-            ), 200
+            return json.dumps({"data": {"has_project": name is not None, "project_name": name or ""}}), 200
         if endpoint == "/open_project":
             path = json_data["path"]
             visible = {item["path"]: item["name"] for item in worker_projects[url]}
             if path not in visible:
                 return json.dumps({"data": {"error": f"not visible on {url}"}}), 200
             worker_state[url] = visible[path]
-            return json.dumps(
-                {"data": {"success": True, "project": worker_state[url]}}
-            ), 200
+            return json.dumps({"data": {"success": True, "project": worker_state[url]}}), 200
         raise AssertionError(f"unexpected request: {method} {endpoint}")
 
     with patch.object(project_sessions.transport, "do_request", side_effect=do_request):
@@ -396,16 +390,12 @@ def test_checkout_falls_back_when_one_visible_worker_cannot_open_project():
             return json.dumps([PROJECTS[0]]), 200
         if endpoint == "/get_project_info":
             name = worker_state[url]
-            return json.dumps(
-                {"data": {"has_project": name is not None, "project_name": name or ""}}
-            ), 200
+            return json.dumps({"data": {"has_project": name is not None, "project_name": name or ""}}), 200
         if endpoint == "/open_project":
             if url == "http://127.0.0.1:8089":
                 return json.dumps({"data": {"error": "project storage is stale"}}), 200
             worker_state[url] = "alpha"
-            return json.dumps(
-                {"data": {"success": True, "project": "alpha"}}
-            ), 200
+            return json.dumps({"data": {"success": True, "project": "alpha"}}), 200
         raise AssertionError(f"unexpected request: {method} {endpoint}")
 
     with patch.object(project_sessions.transport, "do_request", side_effect=do_request):
@@ -416,3 +406,122 @@ def test_checkout_falls_back_when_one_visible_worker_cannot_open_project():
             assert worker_state["http://127.0.0.1:8090"] == "alpha"
         finally:
             project_sessions.release_lease(lease)
+
+
+@pytest.mark.asyncio
+async def test_clear_worker_queue_cancels_waiters_but_preserves_running_operation(fake_workers):
+    ids = _ids()
+    first = await project_sessions.acquire_project_operation(ids["alpha"], "first")
+
+    entered = asyncio.Event()
+
+    async def queued_call():
+        entered.set()
+        lease = await project_sessions.acquire_project_operation(ids["alpha"], "queued")
+        try:
+            return "ran"
+        finally:
+            await project_sessions.release_project_operation(lease)
+
+    waiter = asyncio.create_task(queued_call())
+    await entered.wait()
+    for _ in range(50):
+        info = project_sessions.session_info(ids["alpha"])
+        if info["queued"] == 1:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("queued operation did not enter worker queue")
+
+    result = await worker_control.clear_worker_queue(0)
+
+    assert result["cancelled_total"] == 1
+    assert result["cancelled_queued"] == 1
+    assert result["cancelled_running"] == 0
+    assert result["in_flight"] == 1
+    assert result["running"] is True
+    assert result["current_operation"] == "first"
+    assert waiter.cancelled()
+
+    await project_sessions.release_project_operation(first)
+    info = project_sessions.session_info(ids["alpha"])
+    assert info["in_flight"] == 0
+    assert info["queued"] == 0
+    assert info["running"] is False
+
+
+@pytest.mark.asyncio
+async def test_recover_worker_cancels_running_and_queued_operations(fake_workers, monkeypatch):
+    ids = _ids()
+    running_started = asyncio.Event()
+    hold = asyncio.Event()
+
+    async def running_call():
+        lease = await project_sessions.acquire_project_operation(ids["alpha"], "stuck")
+        running_started.set()
+        try:
+            await hold.wait()
+        finally:
+            await project_sessions.release_project_operation(lease)
+
+    async def queued_call():
+        lease = await project_sessions.acquire_project_operation(ids["alpha"], "queued")
+        try:
+            await hold.wait()
+        finally:
+            await project_sessions.release_project_operation(lease)
+
+    running = asyncio.create_task(running_call())
+    await running_started.wait()
+    queued = asyncio.create_task(queued_call())
+    for _ in range(50):
+        info = project_sessions.session_info(ids["alpha"])
+        if info["queued"] == 1:
+            break
+        await asyncio.sleep(0.01)
+    else:
+        raise AssertionError("queued operation did not enter worker queue")
+
+    exits: list[str] = []
+    monkeypatch.setattr(
+        worker_control,
+        "_request_worker_exit",
+        lambda url: (exits.append(url), fake_workers.__setitem__(url, None)),
+    )
+    monkeypatch.setattr(worker_control, "_worker_healthy", lambda _url: True)
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(worker_control.asyncio, "sleep", no_sleep)
+
+    result = await worker_control.recover_worker(0, timeout_seconds=2)
+
+    assert result["recovered"] is True
+    assert result["cancelled_total"] == 2
+    assert result["cancelled_queued"] == 1
+    assert result["cancelled_running"] == 1
+    assert result["previous_project_id"] == ids["alpha"]
+    assert exits == ["http://127.0.0.1:8089"]
+    assert running.cancelled()
+    assert queued.cancelled()
+
+    listed = project_sessions.list_projects()
+    worker = listed["workers"][0]
+    assert worker["enabled"] is True
+    assert worker["in_flight"] == 0
+    assert worker["queued"] == 0
+    assert worker["running"] is False
+    assert worker["project_id"] is None
+
+
+def test_disabled_active_worker_refuses_new_project_calls(fake_workers):
+    ids = _ids()
+    lease = project_sessions.checkout(ids["alpha"])
+    project_sessions.release_lease(lease)
+    with project_sessions._lock:
+        first = list(project_sessions._slots.values())[0]
+        first.enabled = False
+
+    with pytest.raises(project_sessions.ProjectBusyError, match="disabled or recovering"):
+        project_sessions.checkout(ids["alpha"])

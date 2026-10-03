@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from . import session_settings, state, transport
+from . import operation_queue, session_settings, state, transport
 from .config import DEFAULT_TCP_URL, logger
 from .validation import validate_server_url
 
@@ -67,7 +67,6 @@ _slots: dict[str, WorkerSlot] = {}
 _configured_urls: tuple[str, ...] = ()
 _catalog: dict[str, ProjectRecord] = {}
 _project_workers: dict[str, frozenset[str]] = {}
-_queue_locks: dict[str, asyncio.Lock] = {}
 _sweeper_stop = threading.Event()
 _sweeper_thread: threading.Thread | None = None
 
@@ -92,14 +91,6 @@ def _timestamp(value: float) -> str | None:
     if value <= 0:
         return None
     return datetime.fromtimestamp(value, timezone.utc).isoformat()
-
-
-def _queue_lock(worker_url: str) -> asyncio.Lock:
-    lock = _queue_locks.get(worker_url)
-    if lock is None:
-        lock = asyncio.Lock()
-        _queue_locks[worker_url] = lock
-    return lock
 
 
 def _ensure_idle_sweeper_locked() -> None:
@@ -266,9 +257,7 @@ def _refresh_catalog_locked(search_dir: str = "") -> dict[str, ProjectRecord]:
     params = {"searchDir": search_dir} if search_dir else None
     for url in _configured_urls:
         try:
-            records = _project_records(
-                _request(url, "GET", "/list_projects", params=params, timeout=20)
-            )
+            records = _project_records(_request(url, "GET", "/list_projects", params=params, timeout=20))
         except Exception as exc:
             errors.append(f"{url}: {exc}")
             continue
@@ -277,12 +266,11 @@ def _refresh_catalog_locked(search_dir: str = "") -> dict[str, ProjectRecord]:
             workers_by_project.setdefault(record.project_id, set()).add(url)
 
     if not workers_by_project and len(errors) == len(_configured_urls):
-        raise ProjectSessionError(
-            "No healthy Ghidra worker could list projects: " + "; ".join(errors)
-        )
+        raise ProjectSessionError("No healthy Ghidra worker could list projects: " + "; ".join(errors))
     _catalog = records_by_id
     _project_workers = {key: frozenset(urls) for key, urls in workers_by_project.items()}
     return _catalog
+
 
 def _project_info(url: str) -> dict[str, Any]:
     value = _request(url, "GET", "/get_project_info", timeout=10)
@@ -331,11 +319,7 @@ def _reconcile_slots_locked() -> None:
 
 def _slot_status(index: int, slot: WorkerSlot) -> dict[str, Any]:
     now = time.time()
-    idle_seconds = (
-        max(0.0, now - slot.last_used_at)
-        if slot.project_id is not None and slot.last_used_at > 0
-        else None
-    )
+    idle_seconds = max(0.0, now - slot.last_used_at) if slot.project_id is not None and slot.last_used_at > 0 else None
     timeout = _idle_timeout_seconds()
     return {
         "worker_index": index,
@@ -362,10 +346,7 @@ def _slot_status(index: int, slot: WorkerSlot) -> dict[str, Any]:
 
 
 def _status_locked() -> list[dict[str, Any]]:
-    return [
-        _slot_status(index, slot)
-        for index, slot in enumerate(_slots.values())
-    ]
+    return [_slot_status(index, slot) for index, slot in enumerate(_slots.values())]
 
 
 def list_projects(query: str = "", search_dir: str = "") -> dict[str, Any]:
@@ -375,7 +356,12 @@ def list_projects(query: str = "", search_dir: str = "") -> dict[str, Any]:
         needle = query.strip().casefold()
         items: list[dict[str, Any]] = []
         for record in sorted(catalog.values(), key=lambda item: (item.name.casefold(), item.path)):
-            if needle and needle not in record.name.casefold() and needle not in record.path.casefold() and needle not in record.project_id:
+            if (
+                needle
+                and needle not in record.name.casefold()
+                and needle not in record.path.casefold()
+                and needle not in record.project_id
+            ):
                 continue
             slot = next((s for s in _slots.values() if s.project_id == record.project_id), None)
             items.append(
@@ -455,9 +441,7 @@ def _open_on_slot_locked(slot: WorkerSlot, record: ProjectRecord) -> None:
     )
     info = _project_info(slot.url)
     if not info.get("has_project") or str(info.get("project_name", "")).strip() != record.name:
-        raise ProjectSessionError(
-            f"Worker {slot.url} did not open requested project {record.name}"
-        )
+        raise ProjectSessionError(f"Worker {slot.url} did not open requested project {record.name}")
     slot.project_id = record.project_id
     slot.project_name = record.name
     slot.error = None
@@ -470,10 +454,13 @@ def checkout(project_id: str) -> ProjectLease:
         _reconcile_slots_locked()
 
         slot = next((item for item in _slots.values() if item.project_id == record.project_id), None)
+        if slot is not None and not slot.enabled:
+            raise ProjectBusyError(f"Worker {slot.url} is disabled or recovering for project {record.project_id}")
         if slot is None:
             eligible_urls = _project_workers.get(record.project_id, frozenset())
             candidates = [
-                item for item in _slots.values()
+                item
+                for item in _slots.values()
                 if item.url in eligible_urls
                 and item.enabled
                 and item.project_id is None
@@ -495,8 +482,7 @@ def checkout(project_id: str) -> ProjectLease:
                     errors.append(f"{candidate.url}: {exc}")
             if slot is None:
                 raise ProjectSessionError(
-                    f"No eligible Ghidra worker could open project {record.name!r}: "
-                    + "; ".join(errors)
+                    f"No eligible Ghidra worker could open project {record.name!r}: " + "; ".join(errors)
                 )
 
         slot.in_flight += 1
@@ -506,6 +492,7 @@ def checkout(project_id: str) -> ProjectLease:
             worker_url=slot.url,
             snapshot=_snapshot(slot.url, record.name),
         )
+
 
 def release_lease(lease: ProjectLease) -> None:
     with _lock:
@@ -559,14 +546,17 @@ async def acquire_project_operation(project_id: str, operation: str) -> ProjectL
     """Acquire the FIFO execution slot for one project/worker."""
 
     lease = await state.run_in_worker(checkout, project_id)
-    lock = _queue_lock(lease.worker_url)
+    lock = operation_queue.lock(lease.worker_url)
+    operation_queue.track(lease.worker_url, "queued")
     await state.run_in_worker(_mark_queued, lease.worker_url)
     try:
         await lock.acquire()
     except BaseException:
+        operation_queue.untrack(lease.worker_url)
         await state.run_in_worker(_mark_cancelled, lease.worker_url)
         await state.run_in_worker(release_lease, lease)
         raise
+    operation_queue.set_state(lease.worker_url, "running")
     await state.run_in_worker(_mark_running, lease.worker_url, operation)
     return lease
 
@@ -574,10 +564,9 @@ async def acquire_project_operation(project_id: str, operation: str) -> ProjectL
 async def release_project_operation(lease: ProjectLease) -> None:
     """Release a project FIFO slot and its worker lease."""
 
+    operation_queue.untrack(lease.worker_url)
     await state.run_in_worker(_mark_finished, lease.worker_url)
-    lock = _queue_locks.get(lease.worker_url)
-    if lock is not None and lock.locked():
-        lock.release()
+    operation_queue.release_lock(lease.worker_url)
     await state.run_in_worker(release_lease, lease)
 
 
@@ -689,7 +678,6 @@ def release_project_session(project_id: str, close_project: bool = True) -> dict
         }
 
 
-
 def _idle_slot_locked() -> WorkerSlot:
     _reconcile_slots_locked()
     slot = next(
@@ -758,9 +746,7 @@ def delete_project(project_id: str) -> dict[str, Any]:
         slot = next((item for item in _slots.values() if item.project_id == record.project_id), None)
         if slot is not None:
             if slot.in_flight:
-                raise ProjectBusyError(
-                    f"Project {record.project_id} has {slot.in_flight} in-flight request(s)"
-                )
+                raise ProjectBusyError(f"Project {record.project_id} has {slot.in_flight} in-flight request(s)")
             _request(slot.url, "POST", "/close_project", json_data={}, timeout=30)
             slot.project_id = None
             slot.project_name = None
@@ -784,7 +770,7 @@ def delete_project(project_id: str) -> dict[str, Any]:
 
 
 def reset_for_tests() -> None:
-    global _configured_urls, _slots, _catalog, _project_workers, _queue_locks, _sweeper_thread
+    global _configured_urls, _slots, _catalog, _project_workers, _sweeper_thread
     _sweeper_stop.set()
     thread = _sweeper_thread
     if thread is not None and thread.is_alive():
@@ -794,5 +780,5 @@ def reset_for_tests() -> None:
         _slots = {}
         _catalog = {}
         _project_workers = {}
-        _queue_locks = {}
+        operation_queue.reset_all()
         _sweeper_thread = None
