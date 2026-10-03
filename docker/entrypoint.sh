@@ -132,7 +132,7 @@ start_worker() {
         --port "${worker_port}" \
         --bind "${BIND_ADDRESS}" \
         "${EXTRA_ARGS[@]}" &
-    PIDS+=("$!")
+    PIDS["${index}"]="$!"
 }
 
 if [ "${WORKER_COUNT}" -eq 1 ]; then
@@ -155,9 +155,14 @@ if [ "${WORKER_COUNT}" -eq 1 ]; then
 fi
 
 PIDS=()
+SHUTTING_DOWN=0
 
 cleanup() {
-    trap - SIGTERM SIGINT
+    if [ "${SHUTTING_DOWN}" -eq 1 ]; then
+        return
+    fi
+    SHUTTING_DOWN=1
+    trap - SIGTERM SIGINT EXIT
     echo ""
     echo -e "${YELLOW}Shutting down GhidraMCP worker pool...${NC}"
     if [ "${#PIDS[@]}" -gt 0 ]; then
@@ -166,20 +171,39 @@ cleanup() {
     fi
 }
 
-trap cleanup SIGTERM SIGINT EXIT
+trap 'cleanup; exit 0' SIGTERM SIGINT
+trap cleanup EXIT
 
 for ((i=0; i<WORKER_COUNT; i++)); do
     start_worker "${i}"
 done
 
-# A worker exit means the pool is no longer consistent. Terminate the rest and
-# let Docker restart the whole service instead of silently running degraded.
-set +e
-wait -n "${PIDS[@]}"
-STATUS=$?
-set -e
-if [ "${STATUS}" -eq 0 ]; then
-    STATUS=1
-fi
-echo -e "${RED}A Ghidra worker exited (status ${STATUS}); restarting the pool.${NC}"
-exit "${STATUS}"
+# Supervise each worker independently. A clean /exit_ghidra request or a crash
+# restarts only that JVM; other project sessions remain available.
+while [ "${SHUTTING_DOWN}" -eq 0 ]; do
+    EXITED_PID=""
+    set +e
+    wait -n -p EXITED_PID "${PIDS[@]}"
+    STATUS=$?
+    set -e
+    if [ "${SHUTTING_DOWN}" -eq 1 ]; then
+        break
+    fi
+
+    EXITED_INDEX=""
+    for ((i=0; i<WORKER_COUNT; i++)); do
+        if [ "${PIDS[$i]:-}" = "${EXITED_PID}" ]; then
+            EXITED_INDEX="${i}"
+            break
+        fi
+    done
+    if [ -z "${EXITED_INDEX}" ]; then
+        echo -e "${RED}Unknown Ghidra worker exited pid=${EXITED_PID:-unknown} status=${STATUS}.${NC}"
+        sleep 1
+        continue
+    fi
+
+    echo -e "${YELLOW}Worker ${EXITED_INDEX} exited (status ${STATUS}); restarting only that worker.${NC}"
+    sleep 1
+    start_worker "${EXITED_INDEX}"
+done
