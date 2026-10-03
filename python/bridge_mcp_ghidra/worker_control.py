@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import stat
 import time
+from pathlib import Path
 from typing import Any
 
 from . import operation_queue, project_sessions, state, transport
@@ -107,13 +110,37 @@ def _reset_slot_after_cancel(worker_url: str) -> None:
         operation_queue.reset_worker(worker_url)
 
 
-def _request_worker_exit(worker_url: str) -> None:
+def _worker_control_fifo() -> Path:
+    return Path(
+        os.getenv(
+            "GHIDRA_MCP_WORKER_CONTROL_FIFO",
+            "/data/bridge/worker-control.fifo",
+        )
+    )
+
+
+def _request_worker_restart(worker_index: int, worker_url: str) -> str:
+    fifo = _worker_control_fifo()
+    try:
+        mode = fifo.stat().st_mode
+    except OSError:
+        mode = 0
+    if stat.S_ISFIFO(mode):
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, f"restart {worker_index}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+        return "supervisor-sigkill"
+
+    # Non-Docker/manual fallback where no shared supervisor control FIFO exists.
     project_sessions._request(
         worker_url,
         "POST",
         "/exit_ghidra",
-        timeout=5,
+        timeout=1,
     )
+    return "native-exit"
 
 
 def _worker_healthy(worker_url: str) -> bool:
@@ -140,10 +167,12 @@ def _finish_recovery(worker_index: int, worker_url: str, enabled: bool) -> dict[
 async def recover_worker(
     worker_index: int,
     *,
-    timeout_seconds: float = 30.0,
+    timeout_seconds: float = 4.0,
 ) -> dict[str, Any]:
-    """Cancel active/queued requests and restart exactly one headless worker JVM."""
+    """Hard-restart exactly one worker and restore it within a bounded fast path."""
 
+    budget = min(4.0, max(1.0, float(timeout_seconds)))
+    started = time.monotonic()
     worker_url, previous_enabled, project_id, project_name = await state.run_in_worker(
         _prepare_recovery,
         worker_index,
@@ -154,17 +183,21 @@ async def recover_worker(
     )
     await state.run_in_worker(_reset_slot_after_cancel, worker_url)
 
-    exit_error = ""
-    try:
-        await state.run_in_worker(_request_worker_exit, worker_url)
-    except Exception as exc:
-        exit_error = str(exc)
+    restart_method = await state.run_in_worker(
+        _request_worker_restart,
+        worker_index,
+        worker_url,
+    )
 
-    # The native endpoint exits about 500 ms after acknowledging the request.
-    await asyncio.sleep(0.75)
-    deadline = time.monotonic() + max(2.0, float(timeout_seconds))
+    # Do not accept the old JVM as recovered. Observe the port go down once,
+    # then require the replacement JVM to become healthy within the budget.
+    observed_down = False
+    deadline = started + budget
     while time.monotonic() < deadline:
-        if await state.run_in_worker(_worker_healthy, worker_url):
+        healthy = await state.run_in_worker(_worker_healthy, worker_url)
+        if not healthy:
+            observed_down = True
+        elif observed_down:
             status = await state.run_in_worker(
                 _finish_recovery,
                 worker_index,
@@ -175,13 +208,14 @@ async def recover_worker(
                 **status,
                 **cancelled,
                 "recovered": True,
+                "restart_method": restart_method,
+                "recovery_ms": round((time.monotonic() - started) * 1000, 1),
                 "previous_project_id": project_id,
                 "previous_project_name": project_name,
-                "exit_error": exit_error or None,
             }
-        await asyncio.sleep(0.25)
+        await asyncio.sleep(0.05)
 
     with project_sessions._lock:
         slot = project_sessions._slots[worker_url]
-        slot.error = "worker recovery timed out"
-    raise project_sessions.ProjectSessionError(f"Worker {worker_index} did not recover within {timeout_seconds:.1f}s")
+        slot.error = f"worker recovery exceeded {budget:.1f}s budget"
+    raise project_sessions.ProjectSessionError(f"Worker {worker_index} did not recover within {budget:.1f}s")

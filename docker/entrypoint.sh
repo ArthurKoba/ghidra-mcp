@@ -77,6 +77,8 @@ fi
 # Worker pool configuration
 WORKER_COUNT=${GHIDRA_MCP_WORKER_COUNT:-1}
 WORKER_JAVA_OPTS=${GHIDRA_MCP_WORKER_JAVA_OPTS:-${JAVA_OPTS}}
+WORKER_CONTROL_FIFO=${GHIDRA_MCP_WORKER_CONTROL_FIFO:-/data/bridge/worker-control.fifo}
+WORKER_PID_DIR=${GHIDRA_MCP_WORKER_PID_DIR:-/data/bridge/workers}
 
 if ! [[ "${WORKER_COUNT}" =~ ^[1-9][0-9]*$ ]]; then
     echo -e "${RED}Error: GHIDRA_MCP_WORKER_COUNT must be a positive integer${NC}"
@@ -133,6 +135,8 @@ start_worker() {
         --bind "${BIND_ADDRESS}" \
         "${EXTRA_ARGS[@]}" &
     PIDS["${index}"]="$!"
+    mkdir -p "${WORKER_PID_DIR}"
+    printf '%s\n' "${PIDS[$index]}" > "${WORKER_PID_DIR}/worker-${index}.pid"
 }
 
 if [ "${WORKER_COUNT}" -eq 1 ]; then
@@ -156,6 +160,43 @@ fi
 
 PIDS=()
 SHUTTING_DOWN=0
+CONTROL_PID=""
+
+setup_worker_control() {
+    mkdir -p "$(dirname "${WORKER_CONTROL_FIFO}")" "${WORKER_PID_DIR}"
+    rm -f "${WORKER_CONTROL_FIFO}"
+    mkfifo "${WORKER_CONTROL_FIFO}"
+    chmod 660 "${WORKER_CONTROL_FIFO}"
+}
+
+worker_control_loop() {
+    # Keep one read/write fd open for the lifetime of the supervisor so a
+    # non-blocking bridge writer never races a FIFO close/reopen window.
+    exec 9<>"${WORKER_CONTROL_FIFO}"
+    while [ "${SHUTTING_DOWN}" -eq 0 ]; do
+        local action=""
+        local index=""
+        if ! read -r action index <&9; then
+            continue
+        fi
+        if [ "${action}" != "restart" ] || ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
+            echo -e "${YELLOW}Ignoring invalid worker control command: ${action} ${index}${NC}"
+            continue
+        fi
+        local pid_file="${WORKER_PID_DIR}/worker-${index}.pid"
+        local pid=""
+        if [ -r "${pid_file}" ]; then
+            pid=$(cat "${pid_file}" 2>/dev/null || true)
+        fi
+        if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+            echo -e "${YELLOW}Emergency-restarting worker ${index} (pid ${pid})...${NC}"
+            kill -KILL "${pid}" 2>/dev/null || true
+        else
+            echo -e "${YELLOW}Worker ${index} has no live pid; supervisor will reconcile on exit.${NC}"
+        fi
+    done
+    exec 9>&-
+}
 
 cleanup() {
     if [ "${SHUTTING_DOWN}" -eq 1 ]; then
@@ -165,14 +206,22 @@ cleanup() {
     trap - SIGTERM SIGINT EXIT
     echo ""
     echo -e "${YELLOW}Shutting down GhidraMCP worker pool...${NC}"
+    if [ -n "${CONTROL_PID}" ]; then
+        kill "${CONTROL_PID}" 2>/dev/null || true
+    fi
     if [ "${#PIDS[@]}" -gt 0 ]; then
         kill "${PIDS[@]}" 2>/dev/null || true
         wait "${PIDS[@]}" 2>/dev/null || true
     fi
+    rm -f "${WORKER_CONTROL_FIFO}"
 }
 
 trap 'cleanup; exit 0' SIGTERM SIGINT
 trap cleanup EXIT
+
+setup_worker_control
+worker_control_loop &
+CONTROL_PID="$!"
 
 for ((i=0; i<WORKER_COUNT; i++)); do
     start_worker "${i}"
@@ -204,6 +253,5 @@ while [ "${SHUTTING_DOWN}" -eq 0 ]; do
     fi
 
     echo -e "${YELLOW}Worker ${EXITED_INDEX} exited (status ${STATUS}); restarting only that worker.${NC}"
-    sleep 1
     start_worker "${EXITED_INDEX}"
 done

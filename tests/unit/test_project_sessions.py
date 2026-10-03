@@ -482,13 +482,16 @@ async def test_recover_worker_cancels_running_and_queued_operations(fake_workers
     else:
         raise AssertionError("queued operation did not enter worker queue")
 
-    exits: list[str] = []
+    restarts: list[tuple[int, str]] = []
     monkeypatch.setattr(
         worker_control,
-        "_request_worker_exit",
-        lambda url: (exits.append(url), fake_workers.__setitem__(url, None)),
+        "_request_worker_restart",
+        lambda index, url: (restarts.append((index, url)), fake_workers.__setitem__(url, None), "supervisor-sigkill")[
+            -1
+        ],
     )
-    monkeypatch.setattr(worker_control, "_worker_healthy", lambda _url: True)
+    health = iter([False, True])
+    monkeypatch.setattr(worker_control, "_worker_healthy", lambda _url: next(health))
 
     async def no_sleep(_seconds: float) -> None:
         return None
@@ -502,7 +505,9 @@ async def test_recover_worker_cancels_running_and_queued_operations(fake_workers
     assert result["cancelled_queued"] == 1
     assert result["cancelled_running"] == 1
     assert result["previous_project_id"] == ids["alpha"]
-    assert exits == ["http://127.0.0.1:8089"]
+    assert restarts == [(0, "http://127.0.0.1:8089")]
+    assert result["restart_method"] == "supervisor-sigkill"
+    assert result["recovery_ms"] < 2000
     assert running.cancelled()
     assert queued.cancelled()
 

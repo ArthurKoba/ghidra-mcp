@@ -148,7 +148,7 @@ async def clear_worker_queue(worker_index: int) -> str:
 
 
 @mcp.tool()
-async def recover_worker(worker_index: int, timeout_seconds: float = 30.0) -> str:
+async def recover_worker(worker_index: int, timeout_seconds: float = 4.0) -> str:
     """Emergency recovery: cancel active/queued calls and restart one headless worker JVM."""
     try:
         result = await worker_control.recover_worker(
