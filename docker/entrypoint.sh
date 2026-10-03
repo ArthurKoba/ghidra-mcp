@@ -170,10 +170,13 @@ setup_worker_control() {
 }
 
 worker_control_loop() {
+    # Keep one read/write fd open for the lifetime of the supervisor so a
+    # non-blocking bridge writer never races a FIFO close/reopen window.
+    exec 9<>"${WORKER_CONTROL_FIFO}"
     while [ "${SHUTTING_DOWN}" -eq 0 ]; do
         local action=""
         local index=""
-        if ! read -r action index < "${WORKER_CONTROL_FIFO}"; then
+        if ! read -r action index <&9; then
             continue
         fi
         if [ "${action}" != "restart" ] || ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
@@ -192,6 +195,7 @@ worker_control_loop() {
             echo -e "${YELLOW}Worker ${index} has no live pid; supervisor will reconcile on exit.${NC}"
         fi
     done
+    exec 9>&-
 }
 
 cleanup() {
