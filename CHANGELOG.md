@@ -30,7 +30,7 @@ Complete version history for the Ghidra MCP Server project.
 - Project-session registry now aggregates project visibility across all headless workers and routes a project only to workers that actually expose its storage. Stale `.gpr` markers without the matching project storage directory are no longer advertised as available projects.
 
 - Worker slots now support maintenance enable/disable control without killing JVM processes; disabled workers are removed from project routing and can optionally release their idle project session first.
-- Busy headless workers now support explicit queue cancellation and emergency single-worker recovery. Recovery cancels bridge-side queued/running requests, restarts only the selected JVM through `/exit_ghidra`, and leaves the rest of the worker pool online; the Docker supervisor now replaces an exited worker in place instead of restarting the whole pool.
+- Busy headless workers now support explicit queue cancellation and emergency single-worker recovery. Docker recovery uses a shared supervisor control FIFO to SIGKILL only the selected JVM and immediately replace it, while bridge-side queued/running requests are cancelled and the rest of the worker pool remains online. The fallback non-Docker path still uses `/exit_ghidra`. Recovery is bounded to a 4-second fast-path budget.
 
 - Project-scoped headless workers now expose an explicit FIFO execution queue per active project/session, report queued/running/current-operation/last-used state, and can auto-release idle sessions via `GHIDRA_MCP_PROJECT_IDLE_TIMEOUT_SECONDS` (default 900 seconds, `0` disables auto-release).
 
