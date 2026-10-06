@@ -2013,10 +2013,10 @@ public class ProgramScriptService {
         }
 
         SecurityConfig security = SecurityConfig.getInstance();
-        java.nio.file.Path resolved = security.resolveWithinFileRoot(filePath);
+        java.nio.file.Path resolved = security.resolveWithinImportRoot(filePath);
         if (resolved == null) {
             return Response.err("Path is outside the allowed file root ("
-                    + security.getFileRoot() + "): " + filePath);
+                    + security.getImportRoot() + "): " + filePath);
         }
 
         File file = resolved.toFile();
