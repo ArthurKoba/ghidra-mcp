@@ -6,12 +6,12 @@ ROOT = Path(__file__).resolve().parents[2]
 def test_compose_separates_artifacts_projects_and_builtin_scripts():
     compose = (ROOT / "docker-compose.yaml").read_text(encoding="utf-8")
     assert 'GHIDRA_MCP_FILE_ROOT: "/artifacts"' in compose
-    assert 'GHIDRA_MCP_IMPORT_ROOT: "/workspace"' in compose
+    assert 'GHIDRA_MCP_IMPORT_ROOT: "/shared-workspace"' in compose
     assert 'GHIDRA_MCP_PROJECT_ROOT: "/projects"' in compose
     assert 'GHIDRA_MCP_SCRIPT_ROOT: "/artifacts/scripts"' in compose
     assert "ghidra-projects:/projects" in compose
     assert "koba-artifacts:/artifacts" in compose
-    assert "shared-workspace:/workspace" in compose
+    assert "shared-workspace:/shared-workspace" in compose
     assert "GHIDRA_MCP_WORKSPACE_VOLUME" in compose
     assert "/home/ubuntu/ghidra_scripts" not in compose
     assert "/home/ghidra/ghidra_scripts" not in compose
