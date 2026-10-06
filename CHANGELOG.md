@@ -10,8 +10,6 @@ Complete version history for the Ghidra MCP Server project.
 
 - Added a private raw artifact-upload fast path for trusted Analysis service traffic. Existing MCP/base64 artifact staging remains supported for agents and clients that cannot send normal files.
 
-- The headless Compose deployment can mount the existing shared Files/Terminal workspace into `/workspace` via `GHIDRA_MCP_WORKSPACE_VOLUME`, so storage-first imports consume the same bytes instead of duplicating them through MCP staging.
-
 - Headless artifact transfer now supports bounded `artifact_file_read` chunks plus constrained `artifact_file_delete` cleanup under `GHIDRA_MCP_FILE_ROOT`, allowing trusted orchestrators to copy exported GZF/GAR artifacts out without mounting or exposing project storage.
 
 - Sunplus SPHE audio-DSP packaging now compiles the `.slaspec` to an explicit co-located `.sla`, verifies it in both builder and final runtime stages, and aligns CI with the Docker runtime's Ghidra 12.1.3. This prevents a registered language definition from surviving into an image without a loadable SLEIGH artifact.
