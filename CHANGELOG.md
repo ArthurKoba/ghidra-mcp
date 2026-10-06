@@ -8,9 +8,9 @@ Complete version history for the Ghidra MCP Server project.
 
 ### MCP schema and rename consistency fixes
 
-- The headless Compose deployment can mount the existing shared Files/Terminal workspace into `/workspace` via `GHIDRA_MCP_WORKSPACE_VOLUME`, so storage-first imports consume the same bytes instead of duplicating them through MCP staging.
+- Added a private raw artifact-upload fast path for trusted Analysis service traffic. Existing MCP/base64 artifact staging remains supported for agents and clients that cannot send normal files.
 
-- Binary imports can now use a dedicated `GHIDRA_MCP_IMPORT_ROOT` (for example `/workspace`) while artifact staging/exports remain constrained to `GHIDRA_MCP_FILE_ROOT`, enabling storage-first imports without broadening artifact permissions.
+- The headless Compose deployment can mount the existing shared Files/Terminal workspace into `/workspace` via `GHIDRA_MCP_WORKSPACE_VOLUME`, so storage-first imports consume the same bytes instead of duplicating them through MCP staging.
 
 - Headless artifact transfer now supports bounded `artifact_file_read` chunks plus constrained `artifact_file_delete` cleanup under `GHIDRA_MCP_FILE_ROOT`, allowing trusted orchestrators to copy exported GZF/GAR artifacts out without mounting or exposing project storage.
 
