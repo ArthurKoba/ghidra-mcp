@@ -17,7 +17,6 @@ services:
       JAVA_OPTS: "-Xmx1500m -XX:+UseG1GC"
     volumes:
       - ghidra-data:/data
-      - koba-artifacts:/artifacts
       - ghidra-projects:/projects
       - koba-artifacts:/artifacts
     mem_limit: 10g
@@ -54,6 +53,7 @@ services:
         condition: service_healthy
     volumes:
       - ghidra-data:/data
+      - koba-artifacts:/artifacts
     networks:
       coolify:
         aliases:

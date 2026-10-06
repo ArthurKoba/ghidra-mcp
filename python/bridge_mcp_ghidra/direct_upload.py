@@ -39,13 +39,16 @@ def _safe_name(value: str) -> str:
 
 
 async def direct_artifact_upload(request: Request) -> JSONResponse:
-    """Stream one raw file into Hydra/Ghidra artifact storage.
+    """Stream one normal file into Hydra artifact storage without base64.
 
-    MCP base64 artifact staging remains available separately for clients that
-    cannot send a normal file.
+    Existing MCP artifact_stage_* tools remain the compatibility path for
+    clients that can only transport base64 chunks.
     """
     if request.headers.get("x-koba-proxy-origin", "").casefold() != "analysis":
-        return JSONResponse({"error": "direct artifact upload is restricted to Analysis"}, status_code=403)
+        return JSONResponse(
+            {"error": "direct artifact upload is restricted to Analysis"},
+            status_code=403,
+        )
 
     project_id = request.query_params.get("project_id", "").strip()
     if not project_id:
@@ -70,7 +73,10 @@ async def direct_artifact_upload(request: Request) -> JSONResponse:
 
     max_bytes = _max_upload_bytes()
     if expected_size is not None and (expected_size < 0 or expected_size > max_bytes):
-        return JSONResponse({"error": "artifact size exceeds configured direct-upload limit"}, status_code=413)
+        return JSONResponse(
+            {"error": "artifact size exceeds configured direct-upload limit"},
+            status_code=413,
+        )
 
     root = _upload_root()
     root.mkdir(parents=True, exist_ok=True)
