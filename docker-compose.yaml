@@ -20,6 +20,7 @@ services:
       - ghidra-data:/data
       - ghidra-projects:/projects
       - koba-artifacts:/artifacts
+      - shared-workspace:/workspace
     mem_limit: 10g
     cpus: 6
     pids_limit: 768
@@ -62,6 +63,9 @@ volumes:
   ghidra-data:
   ghidra-projects:
   koba-artifacts:
+  shared-workspace:
+    external: true
+    name: ${GHIDRA_MCP_WORKSPACE_VOLUME:-vaxvdsixzrp87pos3hg0frht_terminal-workspace}
 
 networks:
   coolify:

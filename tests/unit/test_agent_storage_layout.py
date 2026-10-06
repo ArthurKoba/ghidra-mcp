@@ -11,6 +11,8 @@ def test_compose_separates_artifacts_projects_and_builtin_scripts():
     assert 'GHIDRA_MCP_SCRIPT_ROOT: "/artifacts/scripts"' in compose
     assert "ghidra-projects:/projects" in compose
     assert "koba-artifacts:/artifacts" in compose
+    assert "shared-workspace:/workspace" in compose
+    assert "GHIDRA_MCP_WORKSPACE_VOLUME" in compose
     assert "/home/ubuntu/ghidra_scripts" not in compose
     assert "/home/ghidra/ghidra_scripts" not in compose
 
