@@ -38,9 +38,6 @@ import java.nio.file.Paths;
  *       analogous containment guard is project-folder scope
  *       ({@link #isPathInProjectScope(String)}), which is enforced only when a project
  *       scope is configured.</li>
- *   <li>{@code GHIDRA_MCP_IMPORT_ROOT} — optional dedicated filesystem root for
- *       binary imports. When set, import operations use this root while artifact
- *       staging/export remains constrained by {@code GHIDRA_MCP_FILE_ROOT}.</li>
  *   <li>{@code GHIDRA_MCP_PROJECT_ROOT} — independent filesystem root for local
  *       Ghidra .gpr/.rep projects. Project lifecycle does not require a shared
  *       Ghidra Server.</li>
@@ -86,8 +83,6 @@ public final class SecurityConfig {
     private final boolean scriptsAllowed;
     private final String fileRoot;       // null if disabled
     private final Path fileRootCanonical;
-    private final String importRoot;     // optional dedicated import-only root
-    private final Path importRootCanonical;
     private final String projectRoot;     // null if disabled
     private final Path projectRootCanonical;
     private final String scriptRoot;      // optional agent-authored script root
@@ -118,15 +113,6 @@ public final class SecurityConfig {
         } else {
             this.fileRoot = null;
             this.fileRootCanonical = null;
-        }
-
-        String rawImportRoot = System.getenv("GHIDRA_MCP_IMPORT_ROOT");
-        if (rawImportRoot != null && !rawImportRoot.isEmpty()) {
-            this.importRoot = rawImportRoot;
-            this.importRootCanonical = canonicalPath(rawImportRoot);
-        } else {
-            this.importRoot = null;
-            this.importRootCanonical = null;
         }
 
         String rawProjectRoot = System.getenv("GHIDRA_MCP_PROJECT_ROOT");
@@ -295,18 +281,6 @@ public final class SecurityConfig {
     public Path resolveWithinFileRoot(String userPath) {
         if (userPath == null) return null;
         return resolveWithinRoot(userPath, fileRootCanonical);
-    }
-
-    /** Dedicated import root when configured; falls back to the general file root. */
-    public String getImportRoot() {
-        return importRoot != null ? importRoot : fileRoot;
-    }
-
-    /** Resolve import inputs without broadening artifact/export access. */
-    public Path resolveWithinImportRoot(String userPath) {
-        if (userPath == null) return null;
-        Path root = importRootCanonical != null ? importRootCanonical : fileRootCanonical;
-        return resolveWithinRoot(userPath, root);
     }
 
     /**

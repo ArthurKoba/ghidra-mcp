@@ -8,9 +8,11 @@ import socket
 import uvicorn
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Route
 
 from . import state
 from .config import logger
+from .direct_upload import direct_artifact_upload
 from .server import mcp
 from .static_tools import _auto_connect, _start_auto_connect_retry
 
@@ -88,6 +90,7 @@ def _build_http_app(transport: str, bind_host: str):
     uvicorn itself instead of delegating to ``mcp.run()``.
     """
     app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+    app.routes.append(Route("/internal/artifacts/upload", direct_artifact_upload, methods=["POST"]))
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=_cors_origin_regex(bind_host),
