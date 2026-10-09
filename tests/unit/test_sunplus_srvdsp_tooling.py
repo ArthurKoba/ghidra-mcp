@@ -223,3 +223,37 @@ def test_codec_reachable_scanner_follows_native_flow_and_reports_gaps() -> None:
     assert 'ins.getFlows()' in text
     assert 'SUNPLUS_REACHABLE_SCAN' in text
     assert 'println("GAP "' in text
+
+
+
+def test_pm24_dynamic_accesses_use_lossless_width_callother_interfaces() -> None:
+    """Avoid direct 3-byte PM LOAD/STORE in the full C optimizer.
+
+    These CALL_OTHER interfaces preserve word addresses and 24-bit values in
+    generated C, but require an executor-side PM userop library for emulation.
+    """
+    text = SLASPEC.read_text()
+    assert "define space PM" in text and "wordsize=3" in text
+    assert "define pcodeop dsp_pm_load24;" in text
+    assert "define pcodeop dsp_pm_store24;" in text
+    assert "local word:3 = dsp_pm_load24(a);" in text
+    assert "DReg4 = word[8,16];" in text
+    assert "PX = zext(word[0,8]);" in text
+    assert "local hi:3 = zext(DReg4) << 8;" in text
+    assert "local lo:3 = zext(PX) & 0xff;" in text
+    assert "dsp_pm_store24(a,word);" in text
+    assert "an emulator that executes these userops must provide a backing" in text
+
+    acceptance = (ROOT / "ghidra_scripts" /
+        "SunplusCodecFullCAcceptance.java").read_text()
+    for module, count in (
+        ("srvdsp.bin", 9),
+        ("aux-profile.bin", 61),
+        ("pcm-profile.bin", 4),
+        ("ac3-profile.bin", 25),
+        ("dts-profile.bin", 98),
+    ):
+        assert f'"{module}", {count}' in acceptance
+    assert "SUNPLUS_CODEC_FULL_C_ACCEPTANCE=PASS" in acceptance
+    assert "decompileCompleted()" in acceptance
+    assert "currentProgram.getFunctionManager().getFunctionCount()" in acceptance

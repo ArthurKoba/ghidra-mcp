@@ -51,6 +51,14 @@ define pcodeop dsp_interrupt_enable;
 define pcodeop dsp_saturate_mr;
 define pcodeop dsp_idle;
 define pcodeop dsp_do_until_ce;
+# Opaque decompiler contract for dynamic 24-bit program-memory access.
+# Ghidra 12.1.3's full C optimizer times out on native *[PM]:3 loads/stores
+# in the observed DTS paths, although firstpass/register/normalize succeed.
+# The userops retain the exact PM word address and all 24 data bits (DREG/PX).
+# IMPORTANT: an emulator that executes these userops must provide a backing
+# PM implementation; unlike raw LOAD/STORE, userops alone do not mutate PM.
+define pcodeop dsp_pm_load24;
+define pcodeop dsp_pm_store24;
 define pcodeop dsp_pop_status_stack;
 define pcodeop dsp_pop_counter_stack;
 define pcodeop dsp_pop_pc_stack;
@@ -592,7 +600,7 @@ macro alu_flags_logic(r) {
 :"" DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=0 & yop2=0 & xop3=0 & DReg4 & DagI & DagM
 {
     local a:2 = DagI;
-    local word:3 = *[PM]:3 a;
+    local word:3 = dsp_pm_load24(a);
     DReg4 = word[8,16];
     PX = zext(word[0,8]);
     DagI = DagI + DagM;
@@ -604,7 +612,7 @@ macro alu_flags_logic(r) {
     local hi:3 = zext(DReg4) << 8;
     local lo:3 = zext(PX) & 0xff;
     local word:3 = hi | lo;
-    *[PM]:3 a = word;
+    dsp_pm_store24(a,word);
     DagI = DagI + DagM;
 }
 

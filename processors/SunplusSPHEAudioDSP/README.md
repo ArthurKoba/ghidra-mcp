@@ -71,6 +71,44 @@ This validates the deployed processor/runtime path for the current target corpus
 
 Board-specific continuation evidence and the current AP1/runtime audio-control contract live in `ArthurKoba/hd-audio-rush-sphe8202r`; keep reusable processor semantics here and target behavior findings in the board repository.
 
+## 24-bit PM C-decompiler recovery (local candidate, 2026-10-09)
+
+A native Ghidra 12.1.3 decompiler regression affected five DTS functions
+(`PM:1769`, `25B7`, `266B`, `273E`, `2755`). All five timed out under
+full `decompile` even with a longer budget; the `firstpass`, `register` and
+`normalize` stages returned promptly. The failure reproduces in standalone
+headless Ghidra without MCP, and persists after mapping the missing DM region.
+
+Target-byte ablations establish that removing dynamic PM reads or DM/PM writes
+breaks the timeout. Using 16-bit PM loads/stores also unblocks all five, but
+**silently drops eight bits and is not a valid DSP model**. The model therefore
+keeps PM as a 24-bit word-addressed space and represents the *pure Type-5*
+program-memory data accesses with explicit `dsp_pm_load24(address)` and
+`dsp_pm_store24(address,word)` p-code userops. The word address remains
+16-bit; the read result and write value are full 24-bit words. `DReg4` receives
+bits 23..8 and `PX` receives bits 7..0, unchanged from the original encoding.
+These operations remain visible in generated C instead of producing a
+truncated or invented C translation.
+
+**Local Ghidra 12.1.3 verification** (isolated SDK/project, not production):
+SLEIGH compiles; P-code inspection verified 3-byte read/output and write/input
+with 2-byte word addresses. From the saved canonical function-entry inventory,
+C generation passed DTS 98/98, AUX 61/61, PCM 4/4 and AC-3 25/25; the existing
+`srvdsp` acceptance passed 117/117 code words and 9/9 C functions. The new
+`ghidra_scripts/SunplusCodecFullCAcceptance.java` provides a repeatable
+post-import regression for already-analyzed programs.
+
+**Validation boundary:** `CALL_OTHER` is an *opaque representation* for the
+native Ghidra decompiler. Its declared arguments and values preserve the full
+24-bit PM access interface, but the userops do **not yet implement PM backing
+memory side effects for P-code emulation** and do not model read-after-write
+aliasing internally. An emulator/userop library or an upstream decompiler fix
+is required before claiming native execution-equivalent P-code. Separately,
+the existing canonical Analysis project must refresh saved instruction P-code
+under a deployed language model before its old C views can be counted as
+repaired. This is local static-C validation, not deployed/runtime/hardware
+acceptance or full DSP-algorithm recovery.
+
 ## Validation boundary
 
 The language source must compile with Ghidra's support/sleigh compiler during
