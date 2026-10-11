@@ -43,6 +43,21 @@ define register offset=0x0d0 size=1 [ AZF ANF AVF ACF MVF CEF AQF ASF ];
 define register offset=0x0e0 size=4 [ DSPCTX ];
 # Synthetic per-loop state. These are analysis temporaries, not physical DSP registers.
 define register offset=0x0e4 size=2 [ DSP_LOOP_START DSP_LOOP_START_SHADOW DSP_LOOP_COUNT_SHADOW ];
+# Analysis-only state for codec DO nesting.  Do not confuse it with real
+# ADSP-218x count/loop/PC stacks (their complete silicon behavior is wider).
+define register offset=0x0ea size=2 [
+    DSP_LOOP_DEPTH DSP_LOOP_START_SHADOW2 DSP_LOOP_START_SHADOW3
+    DSP_COUNT_DEPTH DSP_COUNT0 DSP_COUNT1 DSP_COUNT2 DSP_COUNT3
+];
+# Bounded synthetic call-return slots, separate from modeled loop starts.
+# Real ADSP uses a shared hardware PC stack of depth 16; see README limits.
+define register offset=0x0fa size=2 [
+    DSP_CALL_DEPTH DSP_CALL_RET0 DSP_CALL_RET1 DSP_CALL_RET2 DSP_CALL_RET3
+];
+# EXPERIMENT ONLY: statically-resolved outer/inner loop control state.
+define register offset=0x104 size=2 [
+    DSP_STATIC_START_OUTER DSP_STATIC_START_INNER DSP_STATIC_CNTR_OUTER
+];
 
 # RTI restores architectural status-stack state in addition to the saved PC.
 # The detailed status-stack storage is not yet modeled; keep that side effect
@@ -75,6 +90,8 @@ define context DSPCTX
     srvdsp_wrapper_mode=(1,1) noflow
     codec_ce_loop_end=(2,2) noflow
     codec_ce_phase=(3,3) noflow
+    codec_ce_nested_mode=(4,4) noflow
+    codec_ce_static_depth=(5,6) noflow
 ;
 
 define token inst24(24) endian = big
@@ -120,6 +137,7 @@ define token inst24(24) endian = big
     sf4     = (11,14)
     shx3    = (8,10)
     sexp8   = (0,7) signed
+    sexp_sign = (7,7)
     divq_fixed5 = (11,15)
     divs_fixed3 = (13,15)
 
@@ -567,18 +585,115 @@ macro alu_flags_logic(r) {
 }
 
 # -----------------------------------------------------------------------------
+# Counted nested CE loops need two separate stacks:
+#   - a CNTR write saves the active outer loop's remaining count;
+#   - a DO saves its return loop start, not the counter itself.
+# The four-count/frame model is scoped to the observed codec instructions.
+macro codec_cntr_load(newvalue) {
+    local incoming:2 = newvalue;
+    if (DSP_LOOP_DEPTH == 0) goto <cntr_done>;
+    if (DSP_COUNT_DEPTH == 0) goto <cntr_save0>;
+    if (DSP_COUNT_DEPTH == 1) goto <cntr_save1>;
+    if (DSP_COUNT_DEPTH == 2) goto <cntr_save2>;
+    if (DSP_COUNT_DEPTH == 3) goto <cntr_save3>;
+    goto <cntr_done>; # unmodelled stack-overflow status, no push
+<cntr_save0> DSP_COUNT0 = CNTR; DSP_COUNT_DEPTH = 1; goto <cntr_done>;
+<cntr_save1> DSP_COUNT1 = CNTR; DSP_COUNT_DEPTH = 2; goto <cntr_done>;
+<cntr_save2> DSP_COUNT2 = CNTR; DSP_COUNT_DEPTH = 3; goto <cntr_done>;
+<cntr_save3> DSP_COUNT3 = CNTR; DSP_COUNT_DEPTH = 4;
+<cntr_done> CNTR = incoming;
+}
+
+# Native CALL/RTS uses the ADSP PC stack. Ghidra's CALL P-code branches to the
+# target, but does not populate synthetic PCSTACKTOP on its own. Keep a
+# deliberately bounded return stack for the explicitly opted-in nested mode.
+# This is not a full model of the 16-deep hardware PC stack shared with DO.
+macro codec_call_push(nextword) {
+    local ret:2 = nextword;
+    if (DSP_CALL_DEPTH == 0) goto <call_push0>;
+    if (DSP_CALL_DEPTH == 1) goto <call_push1>;
+    if (DSP_CALL_DEPTH == 2) goto <call_push2>;
+    if (DSP_CALL_DEPTH == 3) goto <call_push3>;
+    goto <call_done>;
+<call_push0> DSP_CALL_RET0 = ret; DSP_CALL_DEPTH = 1; goto <call_done>;
+<call_push1> DSP_CALL_RET1 = ret; DSP_CALL_DEPTH = 2; goto <call_done>;
+<call_push2> DSP_CALL_RET2 = ret; DSP_CALL_DEPTH = 3; goto <call_done>;
+<call_push3> DSP_CALL_RET3 = ret; DSP_CALL_DEPTH = 4;
+<call_done>
+}
+
+# In opted-in nested mode, RTS (including conditional variants) consumes
+# the synthetic call stack. Hardware PC-stack sharing with DO is not modeled.
+macro codec_call_return() {
+    if (DSP_CALL_DEPTH == 1) goto <call_ret0>;
+    if (DSP_CALL_DEPTH == 2) goto <call_ret1>;
+    if (DSP_CALL_DEPTH == 3) goto <call_ret2>;
+    if (DSP_CALL_DEPTH == 4) goto <call_ret3>;
+    return [PCSTACKTOP];
+<call_ret0> DSP_CALL_DEPTH = 0; return [DSP_CALL_RET0];
+<call_ret1> DSP_CALL_DEPTH = 1; return [DSP_CALL_RET1];
+<call_ret2> DSP_CALL_DEPTH = 2; return [DSP_CALL_RET2];
+<call_ret3> DSP_CALL_DEPTH = 3; return [DSP_CALL_RET3];
+}
+
 # Generic end-of-loop processing must wrap all normal instruction constructors:
 # the block-end instruction executes first, then CE counter/back-edge.
 # Kept separate from the specialized srvdsp PM:186C implementation.
 codecLoopStart: is epsilon { export *:2 DSP_LOOP_START; }
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+# Keep the proven lightweight single-loop C recovery as the default.
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <simple_done>;
+    goto [DSP_LOOP_START];
+<simple_done>
+    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
+    CNTR = DSP_LOOP_COUNT_SHADOW;
+}
+# EXPERIMENT: deterministic two-level CE endpoints for CFG recovery.
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <static_outer_done>;
+    goto [DSP_STATIC_START_OUTER];
+<static_outer_done>
+}
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <static_inner_done>;
+    goto [DSP_STATIC_START_INNER];
+<static_inner_done>
+    CNTR = DSP_STATIC_CNTR_OUTER;
+}
+# Expanded stack handling is selected only for proven nested DO regions.
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_done>;
     goto [DSP_LOOP_START];
 <codec_ce_done>
-    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
-    CNTR = DSP_LOOP_COUNT_SHADOW;
+    if (DSP_LOOP_DEPTH == 1) goto <ce_pop1>;
+    if (DSP_LOOP_DEPTH == 2) goto <ce_pop2>;
+    if (DSP_LOOP_DEPTH == 3) goto <ce_pop3>;
+    if (DSP_LOOP_DEPTH == 4) goto <ce_pop4>;
+    goto <ce_count_restore>;
+<ce_pop1> DSP_LOOP_START = 0; DSP_LOOP_DEPTH = 0; goto <ce_count_restore>;
+<ce_pop2> DSP_LOOP_START = DSP_LOOP_START_SHADOW; DSP_LOOP_DEPTH = 1; goto <ce_count_restore>;
+<ce_pop3> DSP_LOOP_START = DSP_LOOP_START_SHADOW2; DSP_LOOP_DEPTH = 2; goto <ce_count_restore>;
+<ce_pop4> DSP_LOOP_START = DSP_LOOP_START_SHADOW3; DSP_LOOP_DEPTH = 3;
+<ce_count_restore>
+    if (DSP_COUNT_DEPTH == 0) goto <ce_finish>;
+    if (DSP_COUNT_DEPTH == 1) goto <ce_count0>;
+    if (DSP_COUNT_DEPTH == 2) goto <ce_count1>;
+    if (DSP_COUNT_DEPTH == 3) goto <ce_count2>;
+    if (DSP_COUNT_DEPTH == 4) goto <ce_count3>;
+    goto <ce_finish>;
+<ce_count0> CNTR = DSP_COUNT0; DSP_COUNT_DEPTH = 0; goto <ce_finish>;
+<ce_count1> CNTR = DSP_COUNT1; DSP_COUNT_DEPTH = 1; goto <ce_finish>;
+<ce_count2> CNTR = DSP_COUNT2; DSP_COUNT_DEPTH = 2; goto <ce_finish>;
+<ce_count3> CNTR = DSP_COUNT3; DSP_COUNT_DEPTH = 3;
+<ce_finish>
 }
 :^instruction is codec_ce_phase=0 & instruction [ codec_ce_phase=1; ] {
     build instruction;
@@ -642,6 +757,24 @@ with : codec_ce_phase=1 {
 # Direct/immediate moves (Types 3, 6, 7).
 # -----------------------------------------------------------------------------
 
+# Explicit codec counter loads also model the counter-stack push on write.
+# The srvdsp wrapper retains its existing isolated language semantics.
+# EXPERIMENT: inner-loop counter saves the statically known outer counter.
+:DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local addr:2=addr14;
+    local newval:2=*[DM]:2 addr;
+    DSP_STATIC_CNTR_OUTER = CNTR;
+    CNTR = newval;
+}
+
+:DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local dmaddr:2 = addr14;
+    local incoming:2 = *[DM]:2 dmaddr;
+    codec_cntr_load(incoming);
+}
+
 :DMREAD RegSel, addr14 is type3=4 & dir20=0 & RegSel & addr14
 {
     local dmaddr:2 = addr14;
@@ -657,6 +790,19 @@ with : codec_ce_phase=1 {
 :LDI DReg, imm16 is op4=4 & DReg & imm16
 {
     DReg = imm16;
+}
+
+# LDI CNTR is the other corpus-proven counter-stack push instruction.
+# EXPERIMENT: inner-loop immediate counter with one static saved frame.
+:LDI CNTR, data14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
+{
+    DSP_STATIC_CNTR_OUTER = CNTR;
+    CNTR = data14;
+}
+
+:LDI CNTR, data14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
+{
+    codec_cntr_load(data14:2);
 }
 
 :LDI RegSel, data14 is op4=3 & RegSel & data14
@@ -1553,6 +1699,12 @@ macro resident_tail(target) {
     goto JumpAddr;
 }
 
+:CALL JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=15 & JumpAddr
+{
+    codec_call_push(inst_next / 3);
+    call JumpAddr;
+}
+
 :CALL JumpAddr is type10=3 & call18=1 & cond4=15 & JumpAddr
 {
     call JumpAddr;
@@ -1582,6 +1734,13 @@ macro resident_tail(target) {
     if (le != 0) goto JumpAddr;
 }
 
+:"IF NE CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=1 & JumpAddr
+{
+    if (AZF != 0) goto inst_next;
+    codec_call_push(inst_next / 3);
+    call JumpAddr;
+}
+
 :"IF NE CALL" JumpAddr is type10=3 & call18=1 & cond4=1 & JumpAddr
 {
     if (AZF != 0) goto inst_next;
@@ -1608,6 +1767,14 @@ macro resident_tail(target) {
     if (ANF == AVF) goto JumpAddr;
 }
 
+:"IF GT CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=2 & JumpAddr
+{
+    if(AZF!=0) goto inst_next;
+    if(ANF!=AVF) goto inst_next;
+    codec_call_push(inst_next / 3);
+    call JumpAddr;
+}
+
 :"IF GT CALL" JumpAddr is type10=3 & call18=1 & cond4=2 & JumpAddr
 {
     if(AZF!=0) goto inst_next;
@@ -1615,9 +1782,23 @@ macro resident_tail(target) {
     call JumpAddr;
 }
 
+:"IF LT CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=4 & JumpAddr
+{
+    if (ANF == AVF) goto inst_next;
+    codec_call_push(inst_next / 3);
+    call JumpAddr;
+}
+
 :"IF LT CALL" JumpAddr is type10=3 & call18=1 & cond4=4 & JumpAddr
 {
     if (ANF == AVF) goto inst_next;
+    call JumpAddr;
+}
+
+:"IF EQ CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=0 & JumpAddr
+{
+    if (AZF == 0) goto inst_next;
+    codec_call_push(inst_next / 3);
     call JumpAddr;
 }
 
@@ -1640,12 +1821,41 @@ macro resident_tail(target) {
 # -----------------------------------------------------------------------------
 
 
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=0 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
     DSP_LOOP_START_SHADOW = DSP_LOOP_START;
     DSP_LOOP_COUNT_SHADOW = CNTR;
-    DSP_LOOP_START = inst_next / 3; # PM addresses are 24-bit instruction words
+    DSP_LOOP_START = inst_next / 3;
+}
+
+# EXPERIMENT: depth known per native instruction, so no runtime stack switch.
+:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & type11=5 & term4=14 & LoopAddr
+    [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
+{
+    DSP_STATIC_START_OUTER = inst_next / 3;
+}
+:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type11=5 & term4=14 & LoopAddr
+    [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
+{
+    DSP_STATIC_START_INNER = inst_next / 3;
+}
+
+:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type11=5 & term4=14 & LoopAddr
+    [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
+{
+    local start:2 = inst_next / 3; # PM addresses are 24-bit instruction words
+    if (DSP_LOOP_DEPTH == 0) goto <do_first>;
+    if (DSP_LOOP_DEPTH == 1) goto <do_second>;
+    if (DSP_LOOP_DEPTH == 2) goto <do_third>;
+    if (DSP_LOOP_DEPTH == 3) goto <do_fourth>;
+    goto <do_done>; # stack full: DO acts as no-op; overflow status not modeled
+<do_first> DSP_LOOP_DEPTH = 1; goto <do_start>;
+<do_second> DSP_LOOP_START_SHADOW = DSP_LOOP_START; DSP_LOOP_DEPTH = 2; goto <do_start>;
+<do_third> DSP_LOOP_START_SHADOW2 = DSP_LOOP_START; DSP_LOOP_DEPTH = 3; goto <do_start>;
+<do_fourth> DSP_LOOP_START_SHADOW3 = DSP_LOOP_START; DSP_LOOP_DEPTH = 4;
+<do_start> DSP_LOOP_START = start;
+<do_done>
 }
 
 :"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=1 & type11=5 & loop14=0x186c & term4=14 & LoopAddr
@@ -1775,66 +1985,74 @@ macro resident_tail(target) {
 # Type 15 immediate shifter.  srvdsp uses ASHIFT (LO) MR1 BY +4.
 # -----------------------------------------------------------------------------
 
-:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=4 & ShiftX & sexp8
+:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=4 & sexp_sign=0 & ShiftX & sexp8
 {
     local src:4 = sext(ShiftX) << 16;
     local count:1 = sexp8;
-    local res:4 = src;
-    if (count s< 0) goto <ash_hi_right>;
-    res = src << count;
-    goto <ash_hi_done>;
-<ash_hi_right>
-    count = -count;
-    res = src s>> count;
-<ash_hi_done>
+    local res:4 = src << count;
     SR0 = res:2;
     SR1 = res[16,16];
 }
 
-:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=6 & ShiftX & sexp8
+:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=4 & sexp_sign=1 & ShiftX & sexp8
+{
+    local src:4 = sext(ShiftX) << 16;
+    local count:1 = -sexp8;
+    local res:4 = src s>> count;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=6 & sexp_sign=0 & ShiftX & sexp8
 {
     local src:4 = sext(ShiftX);
     local count:1 = sexp8;
-    local res:4 = src;
-    if (count s< 0) goto <ash_lo_right>;
-    res = src << count;
-    goto <ash_lo_done>;
-<ash_lo_right>
-    count = -count;
-    res = src s>> count;
-<ash_lo_done>
+    local res:4 = src << count;
     SR0 = res:2;
     SR1 = res[16,16];
 }
 
-:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=0 & ShiftX & sexp8
+:SR "=" "ASHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=6 & sexp_sign=1 & ShiftX & sexp8
+{
+    local src:4 = sext(ShiftX);
+    local count:1 = -sexp8;
+    local res:4 = src s>> count;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=0 & sexp_sign=0 & ShiftX & sexp8
 {
     local src:4 = zext(ShiftX) << 16;
     local count:1 = sexp8;
-    local res:4 = src;
-    if (count s< 0) goto <lsh_hi_right>;
-    res = src << count;
-    goto <lsh_hi_done>;
-<lsh_hi_right>
-    count = -count;
-    res = src >> count;
-<lsh_hi_done>
+    local res:4 = src << count;
     SR0 = res:2;
     SR1 = res[16,16];
 }
 
-:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=2 & ShiftX & sexp8
+:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=0 & sexp_sign=1 & ShiftX & sexp8
+{
+    local src:4 = zext(ShiftX) << 16;
+    local count:1 = -sexp8;
+    local res:4 = src >> count;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=2 & sexp_sign=0 & ShiftX & sexp8
 {
     local src:4 = zext(ShiftX);
     local count:1 = sexp8;
-    local res:4 = src;
-    if (count s< 0) goto <lsh_lo_right>;
-    res = src << count;
-    goto <lsh_lo_done>;
-<lsh_lo_right>
-    count = -count;
-    res = src >> count;
-<lsh_lo_done>
+    local res:4 = src << count;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+:SR "=" "LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=2 & sexp_sign=1 & ShiftX & sexp8
+{
+    local src:4 = zext(ShiftX);
+    local count:1 = -sexp8;
+    local res:4 = src >> count;
     SR0 = res:2;
     SR1 = res[16,16];
 }
@@ -1916,6 +2134,11 @@ macro resident_tail(target) {
 # Type 20 returns used by srvdsp.
 # -----------------------------------------------------------------------------
 
+:RTS is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=15
+{
+    codec_call_return();
+}
+
 :RTS is ret19=0x5000 & rettype=0 & cond4=15
 {
     return [PCSTACKTOP];
@@ -1927,10 +2150,23 @@ macro resident_tail(target) {
     return [PCSTACKTOP];
 }
 
+:"IF EQ RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=0
+{
+    if (AZF == 0) goto inst_next;
+    codec_call_return();
+}
+
 :"IF EQ RTS" is ret19=0x5000 & rettype=0 & cond4=0
 {
     if (AZF == 0) goto inst_next;
     return [PCSTACKTOP];
+}
+
+:"IF GT RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=2
+{
+    if (AZF != 0) goto inst_next;
+    if (ANF != AVF) goto inst_next;
+    codec_call_return();
 }
 
 :"IF GT RTS" is ret19=0x5000 & rettype=0 & cond4=2
@@ -1940,16 +2176,34 @@ macro resident_tail(target) {
     return [PCSTACKTOP];
 }
 
+:"IF LT RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=4
+{
+    if (ANF == AVF) goto inst_next;
+    codec_call_return();
+}
+
 :"IF LT RTS" is ret19=0x5000 & rettype=0 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     return [PCSTACKTOP];
 }
 
+:"IF NE RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=1
+{
+    if (AZF != 0) goto inst_next;
+    codec_call_return();
+}
+
 :"IF NE RTS" is ret19=0x5000 & rettype=0 & cond4=1
 {
     if (AZF != 0) goto inst_next;
     return [PCSTACKTOP];
+}
+
+:"IF GE RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=5
+{
+    if (ANF != AVF) goto inst_next;
+    codec_call_return();
 }
 
 :"IF GE RTS" is ret19=0x5000 & rettype=0 & cond4=5

@@ -94,6 +94,73 @@ jobs:
           -postScript SunplusDSPCeLoopRegression.java \
           -deleteProject
 
+    - name: Verify Sunplus bounded nested CE loops
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-nested-ce-projects
+        for fixture in nested_ce_2x3 nested_ce_4deep nested_ce_dmread_2x3; do
+          base=0x100
+          if [ "$fixture" = "nested_ce_4deep" ]; then base=0x200; fi
+          output=$("$GHIDRA_DIR/support/analyzeHeadless" \
+            /tmp/sunplus-nested-ce-projects "nested-$fixture" \
+            -import "tests/fixtures/sunplus_sphe_audio_dsp/$fixture.bin" \
+            -loader BinaryLoader -loader-baseAddr "$base" \
+            -processor "SunplusSPHEAudioDSP:BE:16:default" \
+            -noanalysis -scriptPath "$PWD/ghidra_scripts" \
+            -postScript SunplusNestedCeLoopAcceptance.java -deleteProject 2>&1)
+          printf '%s\n' "$output" | grep -F "NESTED_CE_RUNTIME_ACCEPTANCE=PASS $fixture.bin"
+          if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
+            echo "Ghidra script reported an error for $fixture"
+            exit 1
+          fi
+        done
+
+    - name: Verify Sunplus nested CE calls and returns
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-nested-call-projects
+        for fixture in nested_ce_call_2x3 nested_ce_call_2stage nested_ce_condcall_2x3; do
+          case "$fixture" in
+            nested_ce_condcall_2x3)
+              script=SunplusConditionalCeCallAcceptance.java
+              marker="CONDITIONAL_CE_CALL_ACCEPTANCE=PASS"
+              ;;
+            *)
+              script=SunplusNestedCallCeAcceptance.java
+              marker="CROSS_CALL_CE_PCODE_RETURN_ACCEPTANCE=PASS $fixture.bin"
+              ;;
+          esac
+          output=$("$GHIDRA_DIR/support/analyzeHeadless" \
+            /tmp/sunplus-nested-call-projects "nested-call-$fixture" \
+            -import "tests/fixtures/sunplus_sphe_audio_dsp/$fixture.bin" \
+            -loader BinaryLoader -loader-baseAddr 0x300 \
+            -processor "SunplusSPHEAudioDSP:BE:16:default" \
+            -noanalysis -scriptPath "$PWD/ghidra_scripts" \
+            -postScript "$script" -deleteProject 2>&1)
+          printf '%s\n' "$output" | grep -F "$marker"
+          if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
+            echo "Ghidra nested call test reported an error: $fixture"
+            exit 1
+          fi
+        done
+
+    - name: Verify Sunplus signed immediate shifter and C
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-signed-shift-projects
+        output=$("$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-signed-shift-projects signed-shift \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/immediate_signed_shift.bin \
+          -loader BinaryLoader -loader-baseAddr 0x400 \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -noanalysis -scriptPath "$PWD/ghidra_scripts" \
+          -postScript SunplusSignedImmediateShiftAcceptance.java -deleteProject 2>&1)
+        printf '%s\n' "$output" | grep -F "SUNPLUS_SIGNED_IMMEDIATE_SHIFT_ACCEPTANCE=PASS"
+        if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
+          echo "Ghidra signed shift regression failed"
+          exit 1
+        fi
+
     - name: Analyze and decompile canonical srvdsp corpus
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)

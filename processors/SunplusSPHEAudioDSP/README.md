@@ -22,7 +22,7 @@ Architecture/model contract:
 - compiler/decompiler model with a synthetic `SP` only for ABI/decompiler support;
 - direct and conditional PM flow;
 - explicit resident-PM handoffs that preserve the numeric target without fabricating unavailable resident code, enabled only under canonical `srvdsp` wrapper context;
-- `CNTR`-controlled P-code for the proven `DO PM:186C UNTIL CE` wrapper loop, plus a separate native-instruction-backed non-nested codec CE-loop model verified at PCM PM:12B9..12BD.
+- `CNTR`-controlled P-code for the proven wrapper `DO PM:186C UNTIL CE` and bounded codec CE-loop nesting, verified by independent 2-level and 4-level P-code emulation fixtures; the native PCM PM:12B9..12BD single-loop regression remains.
 
 Instruction families exercised and modeled by the canonical corpus:
 
@@ -131,13 +131,23 @@ The traversal follows decoded fallthrough and direct-flow edges from the observe
 
 The canonical 1128-byte `srvdsp.bin` corpus is the decompiler-grade acceptance target for this language module. The recovered image is loaded at PM word address `0x1800`; its first 32 words are a vector table and the locally implemented code occupies `PM:0x1820..0x1894`.
 
+Type-15 immediate ASHIFT and LSHIFT constructors are explicitly specialized
+on the encoded count sign bit, rather than branching at runtime on an
+immediate value known at decode time. This avoids spurious Ghidra
+Removing unreachable block diagnostics for constant shift direction. A
+read-only test against the canonical PCM GZF identified and eliminated the
+PM:0859 warning; in combination with a statically selected two-level CE
+model, resident handoff C contains four visible loops and zero such
+warnings. This is isolated static/decompiler validation, not proof of
+hardware PCM numeric equivalence or deployment.
+
 Important Ghidra modeling details:
 
 - PM uses `wordsize=3` and therefore **must use `alignment=3`**. `alignment=1` compiles but Ghidra 12.1.3 will not create instructions for the 24-bit stream.
 - Java address APIs operate in byte offsets. Target DSP word addresses must be converted through `AddressSpace.getAddressableUnitSize()` before rebase, disassembly, or function creation.
 - The compiler spec exposes a synthetic `SP` in DM solely to satisfy Ghidra stack/decompiler ABI requirements. This does not assert a physical software stack on the DSP; architectural return behavior remains represented by `PCSTACKTOP`.
 - Jumps from the wrapper into resident PM outside the image are represented by `dsp_resident_tailcall` userops only when the canonical postprocessor/script sets `srvdsp_wrapper_mode=1`. Generic programs default to normal local jump semantics even if their numeric target matches a wrapper-resident address.
-- The canonical `DO PM:186C UNTIL CE` sequence remains the wrapper-specific real `CNTR`-controlled flow. In codec mode, `DO ... UNTIL CE` now marks the decoded end instruction and emits a P-code counter decrement and conditional back-edge after its original P-code. An isolated PCM-native regression validates a single loop at PM:12B9..12BD. Nested loop counters, deep hardware loop stacks, emulator fidelity, and complete C/CFG reconstruction are **not validated** by this regression; preserve this limitation when interpreting codec pseudocode.
+- The canonical `DO PM:186C UNTIL CE` sequence remains the wrapper-specific real `CNTR`-controlled flow. In codec mode, `DO ... UNTIL CE` now marks the decoded end instruction and emits a P-code counter decrement and conditional back-edge after its original P-code. An isolated PCM-native regression validates a single loop at PM:12B9..12BD. Codec counter loads through `LDI CNTR` and direct `DMREAD CNTR` now preserve an outer active counter in synthetic stack state, while `DO` saves the loop start separately. Isolated Ghidra emulator regressions execute two nested levels (2×3), four levels (2×3×2×2), and the native PCM direct-DM counter-load encoding. The lightweight non-nested P-code path remains the default (`codec_ce_nested_mode=0`). Only set `codec_ce_nested_mode=1` across verified overlapping native `DO` regions, before disassembling the relevant instructions; that selects the bounded stack model without regressing simple-loop C output. Existing saved instructions cannot accept context changes in place: clear only proven affected instructions in a controlled transaction and re-disassemble them. The models bound nesting at four and intentionally do not assert exact hardware overflow/status-stack handling, dynamic branches out of loops, arbitrary counter writers, or full-profile C/CFG correctness. The opted-in codec nested mode includes a bounded four-frame synthetic CALL/RTS return stack. It covers the conditional CALL and RTS forms used by this instruction corpus. Independent emulator tests validate unseeded return addresses for a single called inner CE loop, a two-stage native CALL chain, and the taken/skipped IF NE CALL branches. Real ADSP-218x hardware uses a shared 16-deep PC stack for both CALL and DO; separate synthetic call and loop slots do NOT reproduce shared overflow, interrupts, special stack instructions, or all non-local exits. When re-decoding a saved program, select nested mode only for validated DO, CNTR writes, CE ends, CALL sites and callee RTS (including conditional forms); leaving callee returns in default mode would invalidate the cross-call contract. The resident PCM handoff outer loop at PM:0833..0853 calls other DSP routines that also write CNTR; the synthetic nested acceptance does NOT prove preserving an outer count across interprocedural calls. Do not automatically enable nested mode over the whole PCM handoff until callee entry/exit and counter-stack interactions are checked. Existing saved analyses must re-disassemble affected loop instructions after installing the new language; decoder deployment alone does not update old P-code.
 - Canonical `srvdsp.bin` analysis also materializes an uninitialized `SRVDSP_DM_STATE` block covering `DM:0000..017F.1`, so DSP state can be named and typed without altering PM bytes.
 - Vector-seeded action nodes default to `void` return type unless a user-defined signature already exists, preventing generic undefined-return warnings in the behavior layer.
 - Saved canonical programs carry a small analysis-model revision marker. Revision 3 applies wrapper context and refreshes only the known resident-handoff / CE-loop instruction words, so older saved state picks up context-scoped decoding without clearing the entire local code region or user action names/comments.

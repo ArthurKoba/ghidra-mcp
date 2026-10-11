@@ -6,6 +6,18 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus DSP: signed immediate shift CFG cleanup (local candidate)
+
+- Remove constant-dead P-code branches from all four Type-15 ASHIFT/LSHIFT immediate shifter forms by splitting positive and negative immediate encodings at the sign bit. Real canonical PCM GZF dry-run confirms removal of the final Removing unreachable block (PM,0x0859) warning: the resident handoff now decompiles with zero warnings and four visible loops when paired with the statically specialized two-level CE logic (previously one warning and three loops). An isolated positive/negative shift emulator fixture checks register values, branch-free P-code, and C decompilation. Production Analysis has not been migrated to this candidate.
+
+### Sunplus DSP: scoped codec CALL/RTS behavior during nested CE loops (local candidate)
+
+- Add a bounded four-frame synthetic CALL/RTS return stack in opt-in codec nested mode, with condition-dependent pushes for IF EQ/NE/GT/LT CALL and condition-dependent pops for IF EQ/NE/GT/GE/LT RTS. Ghidra EmulatorHelper acceptance covers a CE loop with a called inner CE loop, two nested CALL levels and both taken/skipped IF NE CALL paths, without seeding a valid PCSTACKTOP. Hardware uses a shared 16-deep PC stack for CALL and DO; shared overflow/status semantics, special PC-stack operations, interrupts and full live-codec calls are still unverified.
+
+### Sunplus DSP: bounded nested codec CE loops (local candidate)
+
+- Model separate loop-start and counter stacks for codec CE loops. Counter loads (native `LDI CNTR` and direct `DMREAD CNTR`) preserve the active outer count, rather than incorrectly snapshotting the inner count at `DO`. The new `codec_ce_nested_mode=1` context opts known nested regions into the heavier stack logic; ordinary single loops retain the previously validated lightweight C representation. Synthetic EmulatorHelper acceptance now proves two nested levels (2 x 3), four levels (2 x 3 x 2 x 2), and a direct-DM inner count load; the previously validated `srvdsp` wrapper and single PCM loop remain regression gates. Maximum stack overflow flags, asynchronous events and full target-profile C remain outside acceptance.
+
 ### Sunplus DSP: codec zero-overhead CE loops (local candidate)
 
 - Added a scoped P-code loop-end branch model for `DO ... UNTIL CE` in codec mode and an isolated native PCM regression. The synthetic PCM sample now emits a real counter decrement and conditional back-edge where the previous model emitted an opaque userop. Nested hardware loops, full-profile C recovery, and canonical Analysis deployment remain separate acceptance gates; the wrapper-specific `srvdsp` path is preserved.
