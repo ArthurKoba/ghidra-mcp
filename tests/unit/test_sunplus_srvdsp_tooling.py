@@ -110,12 +110,88 @@ def test_codec_ce_loop_has_real_generic_pcode_and_native_fixture() -> None:
     assert "build instruction;" in text
     assert "if (CNTR == 0) goto <codec_ce_done>;" in text
     assert "goto [DSP_LOOP_START];" in text
-    assert "DSP_LOOP_START = inst_next / 3;" in text
+    assert "local start:2 = inst_next / 3;" in text
     assert "dsp_do_until_ce(LoopAddr);" not in text
     fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/pcm_ce_loop_12b8.bin"
     assert fixture.read_bytes().hex() == "3c0205152bde6000a11222a512a2f96800fd0a000f"
     regression = ROOT / "ghidra_scripts/SunplusDSPCeLoopRegression.java"
     assert "SUNPLUS_CODEC_CE_LOOP_ACCEPTANCE=PASS" in regression.read_text()
+
+
+def test_codec_nested_ce_count_and_loop_stack_regressions() -> None:
+    text = SLASPEC.read_text()
+    assert "codec_ce_nested_mode=(4,4) noflow" in text
+    assert "codec_ce_nested_mode=0 & type11=5" in text
+    assert "codec_ce_nested_mode=1 & type11=5" in text
+    assert "codec_ce_nested_mode=1 & op4=3" in text
+    assert "codec_ce_nested_mode=1 & type3=4" in text
+    assert "DSP_LOOP_DEPTH" in text and "DSP_COUNT_DEPTH" in text
+    assert "codec_cntr_load(newvalue)" in text
+    assert "DSP_COUNT0 = CNTR" in text
+    assert "DSP_LOOP_START_SHADOW3 = DSP_LOOP_START" in text
+    assert "DSP_LOOP_START = DSP_LOOP_START_SHADOW3" in text
+    assert "CNTR = DSP_COUNT0" in text and "CNTR = DSP_COUNT3" in text
+    assert ':LDI CNTR, data14 is srvdsp_wrapper_mode=0' in text
+    assert ':DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0' in text
+    fixture_dir = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp"
+    assert (fixture_dir / "nested_ce_2x3.bin").stat().st_size == 30
+    assert (fixture_dir / "nested_ce_4deep.bin").stat().st_size == 57
+    direct = (fixture_dir / "nested_ce_dmread_2x3.bin").read_bytes()
+    assert len(direct) == 30 and direct[6:9] == bytes.fromhex("8c7805")
+    acceptance = (ROOT / "ghidra_scripts/SunplusNestedCeLoopAcceptance.java").read_text()
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "nestedWords" in acceptance
+    assert "Nested mode escaped proved instruction set" in acceptance
+    assert "NESTED_CE_RUNTIME_ACCEPTANCE=PASS" in acceptance
+    assert 'emulator.writeMemoryValue(counterAddress, 2, 3)' in acceptance
+    assert acceptance.count("emulator.setContextRegister(nestedMode, BigInteger.ONE);") == 2
+    assert "Verify Sunplus bounded nested CE loops" in workflow
+
+
+def test_codec_nested_ce_native_interprocedural_calls() -> None:
+    text = SLASPEC.read_text()
+    assert "DSP_CALL_DEPTH" in text and "DSP_CALL_RET0" in text
+    assert "DSP_CALL_RET3" in text
+    assert "codec_call_push(nextword)" in text
+    assert "codec_call_return()" in text
+    assert "codec_ce_nested_mode=1 & type10=3 & call18=1" in text
+    for form in ("IF EQ CALL", "IF NE CALL", "IF GT CALL", "IF LT CALL"):
+        assert f':"{form}" JumpAddr is codec_ce_nested_mode=1' in text
+    for form in ("IF EQ RTS", "IF NE RTS", "IF GT RTS", "IF GE RTS", "IF LT RTS"):
+        assert f':"{form}" is codec_ce_nested_mode=1' in text
+    root = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp"
+    assert (root / "nested_ce_call_2x3.bin").stat().st_size == 39
+    assert (root / "nested_ce_call_2stage.bin").stat().st_size == 51
+    conditional = (root / "nested_ce_condcall_2x3.bin").read_bytes()
+    assert len(conditional) == 39 and conditional[6:9] == bytes.fromhex("1c3091")
+    caller = (ROOT / "ghidra_scripts/SunplusNestedCallCeAcceptance.java").read_text()
+    gated = (ROOT / "ghidra_scripts/SunplusConditionalCeCallAcceptance.java").read_text()
+    assert "CROSS_CALL_CE_PCODE_RETURN_ACCEPTANCE=PASS" in caller
+    assert "CONDITIONAL_CE_CALL_ACCEPTANCE=PASS" in gated
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "Verify Sunplus nested CE calls and returns" in workflow
+
+
+def test_signed_immediate_shifts_use_static_sign_and_no_dead_pcode_edges() -> None:
+    text = SLASPEC.read_text()
+    assert "sexp_sign = (7,7)" in text
+    for mnemonic, mode, selector in (
+        ("ASHIFT", "HI", 4),
+        ("ASHIFT", "LO", 6),
+        ("LSHIFT", "HI", 0),
+        ("LSHIFT", "LO", 2),
+    ):
+        for sign in (0, 1):
+            needle = (f':SR "=" "{mnemonic}" ShiftX "BY" sexp8 "({mode})" '
+                      f'is type15=0x1e & sf4={selector} & sexp_sign={sign}')
+            assert needle in text
+    fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/immediate_signed_shift.bin"
+    assert fixture.read_bytes().hex() == "41480e0f160841480e0f16f80a000f0f26080f26f80f36080f36f80f06080f06f8"
+    script = (ROOT / "ghidra_scripts/SunplusSignedImmediateShiftAcceptance.java").read_text()
+    assert "SUNPLUS_SIGNED_IMMEDIATE_SHIFT_ACCEPTANCE=PASS" in script
+    assert "SIGNED_SHIFT_C completed=" in script
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "Verify Sunplus signed immediate shifter and C" in workflow
 
 
 def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
@@ -134,7 +210,7 @@ def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     assert "srvdsp_wrapper_mode=(1,1) noflow" in text
     assert "srvdsp_wrapper_mode=1" in text
     assert "define pcodeop dsp_do_until_ce" in text
-    assert 'srvdsp_wrapper_mode=0 & type11=5' in text
+    assert 'srvdsp_wrapper_mode=0 & codec_ce_nested_mode=0 & type11=5' in text
     assert "PcodeOp.INT_SUB" in accept
     assert "PcodeOp.CBRANCH" in accept
     assert 'contains("dsp_do_until")' in accept
