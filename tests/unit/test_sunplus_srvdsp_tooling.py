@@ -194,6 +194,23 @@ def test_signed_immediate_shifts_use_static_sign_and_no_dead_pcode_edges() -> No
     assert "Verify Sunplus signed immediate shifter and C" in workflow
 
 
+def test_signed_immediate_or_shifts_eliminate_constant_dead_branches() -> None:
+    text = SLASPEC.read_text()
+    for direction, sf in (("HI", 1), ("LO", 3)):
+        for sign in (0, 1):
+            needle = (f':SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "({direction})" '
+                      f'is type15=0x1e & sf4={sf} & sexp_sign={sign}')
+            assert needle in text
+    assert "t15ohi_r" not in text and "t15olo_r" not in text
+    fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/immediate_or_shift.bin"
+    assert fixture.read_bytes().hex() == "0f0a080f0af80f1a0c0f1afc0a000f"
+    acceptance = (ROOT / "ghidra_scripts/SunplusOrImmediateShiftAcceptance.java").read_text()
+    assert "SUNPLUS_OR_SHIFT_ACCEPTANCE=PASS" in acceptance
+    assert "SUNPLUS_OR_SHIFT_C completed=" in acceptance
+    assert "Verify Sunplus OR immediate shifts and C output" in (
+        ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+
+
 def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     text = SLASPEC.read_text()
     accept = ACCEPT.read_text()
