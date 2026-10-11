@@ -211,6 +211,25 @@ def test_signed_immediate_or_shifts_eliminate_constant_dead_branches() -> None:
         ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
 
 
+def test_se_proven_negative_type12_context_and_arithmetic_gate() -> None:
+    text = SLASPEC.read_text()
+    assert "codec_se_proven_negative=(7,7) noflow" in text
+    for mode in ("shift_d=1 & sf4=4", "shift_d=0 & sf4=4",
+                 "shift_d=0 & sf4=6"):
+        assert f"codec_se_proven_negative=1 & type12=9 & {mode}" in text
+    assert text.count("local magnitude:2 = -SE;") >= 3
+    assert text.count("local res:4 = src s>> magnitude;") >= 3
+    native = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/se_negative_type12.bin"
+    assert native.read_bytes().hex() == "1236631222a512a2f9"
+    script = (ROOT / "ghidra_scripts/SunplusSeNegativeArithmeticAcceptance.java").read_text()
+    assert "SE_NEGATIVE_ARITHMETIC_ACCEPTANCE=PASS" in script
+    c_probe = (ROOT / "ghidra_scripts/SunplusSeNegativeKnownCProbe.java").read_text()
+    assert "SE_NEGATIVE_STATIC_C_ACCEPTANCE=PASS" in c_probe
+    assert "ROLLED_BACK" in c_probe
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "Verify Sunplus proven-negative SE Type-12 shifts" in workflow
+
+
 def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     text = SLASPEC.read_text()
     accept = ACCEPT.read_text()

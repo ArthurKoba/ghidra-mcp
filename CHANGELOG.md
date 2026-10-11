@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus DSP: proven-negative Type-12 SE shift recovery (local candidate)
+
+- Add a context-gated constructor for three Type-12 ASHIFT/DM parallel forms, removing the unreachable positive-sign P-code path only at instruction sites whose native producers prove a negative SE. The existing generic, dynamically signed SE constructor remains the default elsewhere.
+- In an isolated copy of the canonical 115-function PCM GZF, opt-in at PM:06C1, PM:12BB and PM:12BC yields no C unreachable warnings in the PCM arithmetic kernel (1 to 0) and GM5 (2 to 0), retaining all eight GM5 loops. The test transaction was rolled back.
+- A Ghidra EmulatorHelper differential fixture runs original vs opt-in P-code at all three native opcodes for five signed samples each (15/15), comparing SR, data registers, DAG indexes and DSP DM writes. No hardware DSP execution is claimed; static input-state proof and explicit per-instruction context are required before changing a saved Analysis project.
+
 ### Sunplus DSP: Type-15 OR-shift constant-branch cleanup (local candidate)
 
 - Split the remaining two SR OR LSHIFT immediate constructors (HI and LO) by the instruction's encoded sign bit. These previously emitted impossible P-code branches for constant shifts in PCM initialization tables and program-memory data. Native headless Ghidra emulation checks positive/negative HI/LO P-code, numeric SR0/SR1 results, and warning-free C. Isolated read-only decompilation of a byte-verified canonical 115-function PCM GZF now shows 43→0 warnings at PM:0ED7, 91→0 at PM:0FFC, 256→0 at PM:167F, and 22→2 at the GM5 matrix PM:12A3; no hardware execution or production deployment is claimed. CI on the final PR head remains a separate gate. Generic SE-register-driven shifter semantics and hardware equivalence remain unproven.

@@ -92,6 +92,7 @@ define context DSPCTX
     codec_ce_phase=(3,3) noflow
     codec_ce_nested_mode=(4,4) noflow
     codec_ce_static_depth=(5,6) noflow
+    codec_se_proven_negative=(7,7) noflow
 ;
 
 define token inst24(24) endian = big
@@ -1501,6 +1502,52 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { if(AZF!=0) goto inst_next; AR=ALUX&AluConst; alu_flags_logic(AR); }
 :"IF NE" "AR" "=" ALUX "OR" AluConst is type9=4 & z18=0 & amf5=29 & ALUX & AluConst & cond4=1
 { if(AZF!=0) goto inst_next; AR=ALUX|AluConst; alu_flags_logic(AR); }
+
+# Opt-in for an exactly proven negative SE at a specific instruction address.
+# Context is not inferred from the mnemonic: the generic dynamic-SE semantics
+# below stay the default. This constructor is safe only where native trace
+# establishes SE<0 and no intervening write/call can change the register.
+:SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is codec_se_proven_negative=1 & type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+{
+    local addr:2 = ShiftDagI;
+    local step:2 = ShiftDagM;
+    local stored:2 = DReg4;
+    local src:4 = sext(ShiftX) << 16;
+    local magnitude:2 = -SE;
+    local res:4 = src s>> magnitude;
+    SR0 = res:2;
+    SR1 = res[16,16];
+    *[DM]:2 addr = stored;
+    ShiftDagI = addr + step;
+}
+
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+{
+    local addr:2 = ShiftDagI;
+    local step:2 = ShiftDagM;
+    local fetched:2 = *[DM]:2 addr;
+    local src:4 = sext(ShiftX) << 16;
+    local magnitude:2 = -SE;
+    local res:4 = src s>> magnitude;
+    SR0 = res:2;
+    SR1 = res[16,16];
+    DReg4 = fetched;
+    ShiftDagI = addr + step;
+}
+
+:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+{
+    local addr:2 = ShiftDagI;
+    local step:2 = ShiftDagM;
+    local fetched:2 = *[DM]:2 addr;
+    local src:4 = sext(ShiftX);
+    local magnitude:2 = -SE;
+    local res:4 = src s>> magnitude;
+    SR0 = res:2;
+    SR1 = res[16,16];
+    DReg4 = fetched;
+    ShiftDagI = addr + step;
+}
 
 # Type 12: shift plus DM read/write.
 :SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
