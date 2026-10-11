@@ -107,7 +107,7 @@ jobs:
             -loader BinaryLoader -loader-baseAddr "$base" \
             -processor "SunplusSPHEAudioDSP:BE:16:default" \
             -noanalysis -scriptPath "$PWD/ghidra_scripts" \
-            -postScript SunplusNestedCeLoopAcceptance.java -deleteProject 2>&1)
+            -postScript SunplusNestedCeLoopAcceptance.java -deleteProject 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output" | grep -F "NESTED_CE_RUNTIME_ACCEPTANCE=PASS $fixture.bin"
           if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
             echo "Ghidra script reported an error for $fixture"
@@ -136,7 +136,7 @@ jobs:
             -loader BinaryLoader -loader-baseAddr 0x300 \
             -processor "SunplusSPHEAudioDSP:BE:16:default" \
             -noanalysis -scriptPath "$PWD/ghidra_scripts" \
-            -postScript "$script" -deleteProject 2>&1)
+            -postScript "$script" -deleteProject 2>&1) || { printf '%s\n' "$output"; exit 1; }
           printf '%s\n' "$output" | grep -F "$marker"
           if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
             echo "Ghidra nested call test reported an error: $fixture"
@@ -154,7 +154,7 @@ jobs:
           -loader BinaryLoader -loader-baseAddr 0x400 \
           -processor "SunplusSPHEAudioDSP:BE:16:default" \
           -noanalysis -scriptPath "$PWD/ghidra_scripts" \
-          -postScript SunplusSignedImmediateShiftAcceptance.java -deleteProject 2>&1)
+          -postScript SunplusSignedImmediateShiftAcceptance.java -deleteProject 2>&1) || { printf '%s\n' "$output"; exit 1; }
         printf '%s\n' "$output" | grep -F "SUNPLUS_SIGNED_IMMEDIATE_SHIFT_ACCEPTANCE=PASS"
         if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
           echo "Ghidra signed shift regression failed"
