@@ -78,6 +78,22 @@ jobs:
           -postScript SunplusDSPDecodeSmoke.java \
           -deleteProject
 
+    - name: Verify Sunplus codec CE-loop P-code and C output
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-codec-ce-projects
+        "$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-codec-ce-projects sunplus-codec-ce \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/pcm_ce_loop_12b8.bin \
+          -loader BinaryLoader \
+          -loader-baseAddr 0x12b8 \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -cspec default \
+          -noanalysis \
+          -scriptPath "$PWD/ghidra_scripts" \
+          -postScript SunplusDSPCeLoopRegression.java \
+          -deleteProject
+
     - name: Analyze and decompile canonical srvdsp corpus
       run: |
         GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)

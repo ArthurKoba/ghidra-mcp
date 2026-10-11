@@ -103,6 +103,21 @@ def test_decode_smoke_normalizes_word_addressed_flow_targets() -> None:
     assert "wordAddress * pm.getAddressableUnitSize()" in smoke
 
 
+def test_codec_ce_loop_has_real_generic_pcode_and_native_fixture() -> None:
+    text = SLASPEC.read_text()
+    assert "codec_ce_loop_end=(2,2) noflow" in text
+    assert "globalset(LoopAddr, codec_ce_loop_end)" in text
+    assert "build instruction;" in text
+    assert "if (CNTR == 0) goto <codec_ce_done>;" in text
+    assert "goto [DSP_LOOP_START];" in text
+    assert "DSP_LOOP_START = inst_next / 3;" in text
+    assert "dsp_do_until_ce(LoopAddr);" not in text
+    fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/pcm_ce_loop_12b8.bin"
+    assert fixture.read_bytes().hex() == "3c0205152bde6000a11222a512a2f96800fd0a000f"
+    regression = ROOT / "ghidra_scripts/SunplusDSPCeLoopRegression.java"
+    assert "SUNPLUS_CODEC_CE_LOOP_ACCEPTANCE=PASS" in regression.read_text()
+
+
 def test_srvdsp_ce_loop_is_modeled_as_real_control_flow() -> None:
     text = SLASPEC.read_text()
     accept = ACCEPT.read_text()

@@ -6,6 +6,10 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus DSP: codec zero-overhead CE loops (local candidate)
+
+- Added a scoped P-code loop-end branch model for `DO ... UNTIL CE` in codec mode and an isolated native PCM regression. The synthetic PCM sample now emits a real counter decrement and conditional back-edge where the previous model emitted an opaque userop. Nested hardware loops, full-profile C recovery, and canonical Analysis deployment remain separate acceptance gates; the wrapper-specific `srvdsp` path is preserved.
+
 ### Sunplus DSP: full C decompilation of 24-bit PM users (local candidate)
 
 - Local Ghidra 12.1.3 regression isolated the five DTS C timeouts to the full optimizer's handling of dynamic 24-bit PM LOAD/STORE in the recovered SLEIGH model. Replace pure Type-5 memory operations with width-preserving named 24-bit P-code userops; register a full-codec C acceptance script. Local static-C regression: DTS 98/98, AUX 61/61, PCM 4/4, AC-3 25/25 and `srvdsp` 9/9. This patch is **not deployed**; PM userop backing semantics for P-code emulation are still open.

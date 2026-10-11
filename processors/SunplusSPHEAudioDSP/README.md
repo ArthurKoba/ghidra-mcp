@@ -22,7 +22,7 @@ Architecture/model contract:
 - compiler/decompiler model with a synthetic `SP` only for ABI/decompiler support;
 - direct and conditional PM flow;
 - explicit resident-PM handoffs that preserve the numeric target without fabricating unavailable resident code, enabled only under canonical `srvdsp` wrapper context;
-- real `CNTR`-controlled semantics for the proven `DO PM:186C UNTIL CE` loop, likewise scoped to that wrapper context.
+- `CNTR`-controlled P-code for the proven `DO PM:186C UNTIL CE` wrapper loop, plus a separate native-instruction-backed non-nested codec CE-loop model verified at PCM PM:12B9..12BD.
 
 Instruction families exercised and modeled by the canonical corpus:
 
@@ -137,7 +137,7 @@ Important Ghidra modeling details:
 - Java address APIs operate in byte offsets. Target DSP word addresses must be converted through `AddressSpace.getAddressableUnitSize()` before rebase, disassembly, or function creation.
 - The compiler spec exposes a synthetic `SP` in DM solely to satisfy Ghidra stack/decompiler ABI requirements. This does not assert a physical software stack on the DSP; architectural return behavior remains represented by `PCSTACKTOP`.
 - Jumps from the wrapper into resident PM outside the image are represented by `dsp_resident_tailcall` userops only when the canonical postprocessor/script sets `srvdsp_wrapper_mode=1`. Generic programs default to normal local jump semantics even if their numeric target matches a wrapper-resident address.
-- The canonical `DO PM:186C UNTIL CE` sequence is modeled as real `CNTR`-controlled flow. Decode context marks the proven single-instruction loop end at `PM:186C`; its P-code decrements `CNTR` and emits a conditional back-edge. Other `DO` forms remain intentionally unsupported until observed in corpus.
+- The canonical `DO PM:186C UNTIL CE` sequence remains the wrapper-specific real `CNTR`-controlled flow. In codec mode, `DO ... UNTIL CE` now marks the decoded end instruction and emits a P-code counter decrement and conditional back-edge after its original P-code. An isolated PCM-native regression validates a single loop at PM:12B9..12BD. Nested loop counters, deep hardware loop stacks, emulator fidelity, and complete C/CFG reconstruction are **not validated** by this regression; preserve this limitation when interpreting codec pseudocode.
 - Canonical `srvdsp.bin` analysis also materializes an uninitialized `SRVDSP_DM_STATE` block covering `DM:0000..017F.1`, so DSP state can be named and typed without altering PM bytes.
 - Vector-seeded action nodes default to `void` return type unless a user-defined signature already exists, preventing generic undefined-return warnings in the behavior layer.
 - Saved canonical programs carry a small analysis-model revision marker. Revision 3 applies wrapper context and refreshes only the known resident-handoff / CE-loop instruction words, so older saved state picks up context-scoped decoding without clearing the entire local code region or user action names/comments.
