@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus DSP: saved-state PCM negative-SE migration acceptance (local-only)
+
+- Added guarded Java scripts for exact three-site Type-12 negative-SE metadata migration and independent verification after saving and reopening the original 115-function PCM project in a separate Ghidra 12.1.3 headless process.
+- In a pinned, isolated project clone, the migration passed (PM:06A2 warning 1→0; GM5 PM:12A3 warnings 2→0), preserving eight GM5 loops, all 115 functions, original DSP instruction bytes and native instruction boundaries. Independent reopen verified context bit codec_se_proven_negative=1, one INT_SRIGHT, zero spurious CBRANCH at all three sites and zero warnings in both C functions.
+- New local validation driver requires the exact tested Sunplus .sla fingerprint and isolates its JavaScript source directory so unrelated legacy scripts cannot break Ghidra compilation. Original Analysis project and hardware were not changed; this is a local persisted-state acceptance, not proof of canonical server migration or DSP hardware equivalence.
+
 ### Sunplus DSP: proven-negative Type-12 SE shift recovery (local candidate)
 
 - Add a context-gated constructor for three Type-12 ASHIFT/DM parallel forms, removing the unreachable positive-sign P-code path only at instruction sites whose native producers prove a negative SE. The existing generic, dynamically signed SE constructor remains the default elsewhere.
