@@ -41,6 +41,8 @@ define register offset=0x0d0 size=1 [ AZF ANF AVF ACF MVF CEF AQF ASF ];
 # Decoder-only context used for the proven srvdsp single-instruction
 # DO ... UNTIL CE loop. This is not an architectural DSP register.
 define register offset=0x0e0 size=4 [ DSPCTX ];
+# Synthetic per-loop state. These are analysis temporaries, not physical DSP registers.
+define register offset=0x0e4 size=2 [ DSP_LOOP_START DSP_LOOP_START_SHADOW DSP_LOOP_COUNT_SHADOW ];
 
 # RTI restores architectural status-stack state in addition to the saved PC.
 # The detailed status-stack storage is not yet modeled; keep that side effect
@@ -71,6 +73,8 @@ define pcodeop dsp_exp_hi;
 define context DSPCTX
     srvdsp_ce_loop_end=(0,0) noflow
     srvdsp_wrapper_mode=(1,1) noflow
+    codec_ce_loop_end=(2,2) noflow
+    codec_ce_phase=(3,3) noflow
 ;
 
 define token inst24(24) endian = big
@@ -563,6 +567,24 @@ macro alu_flags_logic(r) {
 }
 
 # -----------------------------------------------------------------------------
+# Generic end-of-loop processing must wrap all normal instruction constructors:
+# the block-end instruction executes first, then CE counter/back-edge.
+# Kept separate from the specialized srvdsp PM:186C implementation.
+codecLoopStart: is epsilon { export *:2 DSP_LOOP_START; }
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <codec_ce_done>;
+    goto [DSP_LOOP_START];
+<codec_ce_done>
+    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
+    CNTR = DSP_LOOP_COUNT_SHADOW;
+}
+:^instruction is codec_ce_phase=0 & instruction [ codec_ce_phase=1; ] {
+    build instruction;
+}
+with : codec_ce_phase=1 {
+
 # Type 1 dual DM+PM fetch and Type 2 immediate DM write.
 # Type-1 reads are parallel/read-first; PM low 8 bits are captured in PX.
 # -----------------------------------------------------------------------------
@@ -1619,8 +1641,11 @@ macro resident_tail(target) {
 
 
 :"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & type11=5 & term4=14 & LoopAddr
+    [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
-    dsp_do_until_ce(LoopAddr);
+    DSP_LOOP_START_SHADOW = DSP_LOOP_START;
+    DSP_LOOP_COUNT_SHADOW = CNTR;
+    DSP_LOOP_START = inst_next / 3; # PM addresses are 24-bit instruction words
 }
 
 :"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=1 & type11=5 & loop14=0x186c & term4=14 & LoopAddr
@@ -1958,3 +1983,5 @@ macro resident_tail(target) {
 :NOP is whole24=0x000000
 {
 }
+
+} # end generic codec loop instruction layer
