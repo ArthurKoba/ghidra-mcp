@@ -72,10 +72,11 @@ jobs:
            ghidra_scripts/SunplusConditionalCeCallAcceptance.java \
            ghidra_scripts/SunplusSignedImmediateShiftAcceptance.java \
            ghidra_scripts/SunplusOrImmediateShiftAcceptance.java \
+           ghidra_scripts/SunplusSeNegativeArithmeticAcceptance.java \
            ghidra_scripts/SunplusSrvdspAnalyze.java \
            ghidra_scripts/SunplusSrvdspAcceptance.java \
            /tmp/sunplus-dsp-test-scripts/
-        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 9
+        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 10
 
     - name: Instantiate Sunplus SPHE audio-DSP language
       run: |
@@ -198,6 +199,23 @@ jobs:
         printf '%s\n' "$output" | grep -F "SUNPLUS_OR_SHIFT_ACCEPTANCE=PASS" || { printf '%s\n' "$output"; exit 1; }
         if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
           echo "Sunplus OR signed immediate shift regression failed"
+          exit 1
+        fi
+
+    - name: Verify Sunplus proven-negative SE Type-12 shifts
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-se-negative-projects
+        output=$("$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-se-negative-projects se-negative \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/se_negative_type12.bin \
+          -loader BinaryLoader -loader-baseAddr 0x600 \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -noanalysis -scriptPath /tmp/sunplus-dsp-test-scripts \
+          -postScript SunplusSeNegativeArithmeticAcceptance.java -deleteProject 2>&1) || { printf '%s\n' "$output"; exit 1; }
+        printf '%s\n' "$output" | grep -F "SE_NEGATIVE_ARITHMETIC_ACCEPTANCE=PASS variants=15" || { printf '%s\n' "$output"; exit 1; }
+        if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
+          echo "Sunplus negative SE differential regression failed"
           exit 1
         fi
 
