@@ -71,10 +71,11 @@ jobs:
            ghidra_scripts/SunplusNestedCallCeAcceptance.java \
            ghidra_scripts/SunplusConditionalCeCallAcceptance.java \
            ghidra_scripts/SunplusSignedImmediateShiftAcceptance.java \
+           ghidra_scripts/SunplusOrImmediateShiftAcceptance.java \
            ghidra_scripts/SunplusSrvdspAnalyze.java \
            ghidra_scripts/SunplusSrvdspAcceptance.java \
            /tmp/sunplus-dsp-test-scripts/
-        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 8
+        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 9
 
     - name: Instantiate Sunplus SPHE audio-DSP language
       run: |
@@ -180,6 +181,23 @@ jobs:
         printf '%s\n' "$output" | grep -F "SUNPLUS_SIGNED_IMMEDIATE_SHIFT_ACCEPTANCE=PASS" || { printf '%s\n' "$output"; exit 1; }
         if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
           echo "Ghidra signed shift regression failed"
+          exit 1
+        fi
+
+    - name: Verify Sunplus OR immediate shifts and C output
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-or-shift-projects
+        output=$("$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-or-shift-projects or-shift \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/immediate_or_shift.bin \
+          -loader BinaryLoader -loader-baseAddr 0x500 \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" \
+          -noanalysis -scriptPath /tmp/sunplus-dsp-test-scripts \
+          -postScript SunplusOrImmediateShiftAcceptance.java -deleteProject 2>&1) || { printf '%s\n' "$output"; exit 1; }
+        printf '%s\n' "$output" | grep -F "SUNPLUS_OR_SHIFT_ACCEPTANCE=PASS" || { printf '%s\n' "$output"; exit 1; }
+        if printf '%s\n' "$output" | grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort'; then
+          echo "Sunplus OR signed immediate shift regression failed"
           exit 1
         fi
 

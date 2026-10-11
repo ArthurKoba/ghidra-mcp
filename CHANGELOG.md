@@ -6,6 +6,10 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus DSP: Type-15 OR-shift constant-branch cleanup (local candidate)
+
+- Split the remaining two SR OR LSHIFT immediate constructors (HI and LO) by the instruction's encoded sign bit. These previously emitted impossible P-code branches for constant shifts in PCM initialization tables and program-memory data. Native headless Ghidra emulation checks positive/negative HI/LO P-code, numeric SR0/SR1 results, and warning-free C. Isolated read-only decompilation of a byte-verified canonical 115-function PCM GZF now shows 43→0 warnings at PM:0ED7, 91→0 at PM:0FFC, 256→0 at PM:167F, and 22→2 at the GM5 matrix PM:12A3; no hardware execution or production deployment is claimed. CI on the final PR head remains a separate gate. Generic SE-register-driven shifter semantics and hardware equivalence remain unproven.
+
 ### Sunplus DSP: signed immediate shift CFG cleanup (local candidate)
 
 - Remove constant-dead P-code branches from all four Type-15 ASHIFT/LSHIFT immediate shifter forms by splitting positive and negative immediate encodings at the sign bit. Real canonical PCM GZF dry-run confirms removal of the final Removing unreachable block (PM,0x0859) warning: the resident handoff now decompiles with zero warnings and four visible loops when paired with the statically specialized two-level CE logic (previously one warning and three loops). An isolated positive/negative shift emulator fixture checks register values, branch-free P-code, and C decompilation. Production Analysis has not been migrated to this candidate.

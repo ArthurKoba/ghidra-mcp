@@ -131,6 +131,8 @@ The traversal follows decoded fallthrough and direct-flow edges from the observe
 
 The canonical 1128-byte `srvdsp.bin` corpus is the decompiler-grade acceptance target for this language module. The recovered image is loaded at PM word address `0x1800`; its first 32 words are a vector table and the locally implemented code occupies `PM:0x1820..0x1894`.
 
+Both Type-15 SR OR LSHIFT HI/LO immediate forms also split by encoded sign. Isolated Ghidra tests prove branch-free P-code and SR0/SR1 numeric results for positive/negative shifts. The read-only canonical PCM GZF decompiler audit shows warning counts reduced from 43/91/256 to 0/0/0 in the three repeated table-builders (PM:0ED7, PM:0FFC, PM:167F), and 22 to 2 in GM5 PM:12A3. This validates improved generated C, not hardware semantics or the exact contents of the 24-bit PM stores.
+
 Type-15 immediate ASHIFT and LSHIFT constructors are explicitly specialized
 on the encoded count sign bit, rather than branching at runtime on an
 immediate value known at decode time. This avoids spurious Ghidra

@@ -1898,20 +1898,50 @@ macro resident_tail(target) {
 <final_t13or_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m;
 }
 
-# Immediate logical shift OR forms (SF=1/3).
-:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=1 & ShiftX & sexp8
+# Immediate logical shift OR forms: split by the encoded sign to avoid
+# a synthetic impossible C branch on a constant immediate value.
+:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=1 & sexp_sign=0 & ShiftX & sexp8
 {
-    local src:4=zext(ShiftX)<<16; local count:1=sexp8; local shifted:4=src;
-    if (count s<0) goto <t15ohi_r>; shifted=src<<count; goto <t15ohi_d>;
-<t15ohi_r> count=-count; shifted=src>>count;
-<t15ohi_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16];
+    local src:4 = zext(ShiftX) << 16;
+    local count:1 = sexp8;
+    local shifted:4 = src << count;
+    local old:4 = (zext(SR1) << 16) | zext(SR0);
+    local value:4 = old | shifted;
+    SR0 = value:2;
+    SR1 = value[16,16];
 }
-:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=3 & ShiftX & sexp8
+
+:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(HI)" is type15=0x1e & sf4=1 & sexp_sign=1 & ShiftX & sexp8
 {
-    local src:4=zext(ShiftX); local count:1=sexp8; local shifted:4=src;
-    if (count s<0) goto <t15olo_r>; shifted=src<<count; goto <t15olo_d>;
-<t15olo_r> count=-count; shifted=src>>count;
-<t15olo_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16];
+    local src:4 = zext(ShiftX) << 16;
+    local count:1 = -sexp8;
+    local shifted:4 = src >> count;
+    local old:4 = (zext(SR1) << 16) | zext(SR0);
+    local value:4 = old | shifted;
+    SR0 = value:2;
+    SR1 = value[16,16];
+}
+
+:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=3 & sexp_sign=0 & ShiftX & sexp8
+{
+    local src:4 = zext(ShiftX);
+    local count:1 = sexp8;
+    local shifted:4 = src << count;
+    local old:4 = (zext(SR1) << 16) | zext(SR0);
+    local value:4 = old | shifted;
+    SR0 = value:2;
+    SR1 = value[16,16];
+}
+
+:SR "=" "SR OR LSHIFT" ShiftX "BY" sexp8 "(LO)" is type15=0x1e & sf4=3 & sexp_sign=1 & ShiftX & sexp8
+{
+    local src:4 = zext(ShiftX);
+    local count:1 = -sexp8;
+    local shifted:4 = src >> count;
+    local old:4 = (zext(SR1) << 16) | zext(SR0);
+    local value:4 = old | shifted;
+    SR0 = value:2;
+    SR1 = value[16,16];
 }
 
 # EXP(HI) is reference-identified; detailed SE/SS semantics remain explicit.
