@@ -2344,6 +2344,20 @@ public class ProgramScriptService {
     // ========================================================================
 
     /**
+     * Keep GhidraScript execution on the request thread in headless mode.
+     * GUI execution must use the EDT, unless already executing on it.
+     * Scripts own their transactions; do not introduce an outer transaction.
+     */
+    static void dispatchGhidraScript(ThreadingStrategy strategy, Runnable body)
+            throws Exception {
+        if (strategy.isHeadless() || SwingUtilities.isEventDispatchThread()) {
+            body.run();
+        } else {
+            SwingUtilities.invokeAndWait(body);
+        }
+    }
+
+    /**
      * Execute a Ghidra script by path with optional arguments.
      *
      * @param scriptPath Path to the script file
@@ -2398,7 +2412,9 @@ public class ProgramScriptService {
         final PluginTool pluginTool = getToolFromProvider();
 
         try {
-            SwingUtilities.invokeAndWait(() -> {
+            // GhidraScript can compile Java bundles and synchronously decompile.
+            // Executing it on Swing EDT in a headless worker can deadlock.
+            Runnable scriptExecution = () -> {
                 StringWriter scriptWriter = new StringWriter();
                 try {
                     // Capture console output
@@ -2611,10 +2627,11 @@ public class ProgramScriptService {
                         }
                     }
                 }
-            });
+            };
+            dispatchGhidraScript(threadingStrategy, scriptExecution);
         } catch (Exception e) {
-            resultMsg.append("ERROR: Failed to execute on Swing thread: ").append(e.getMessage()).append("\n");
-            Msg.error(this, "Failed to execute on Swing thread", e);
+            resultMsg.append("ERROR: Failed to dispatch Ghidra script: ").append(e.getMessage()).append("\n");
+            Msg.error(this, "Failed to dispatch Ghidra script", e);
         }
 
         return Response.ok(JsonHelper.mapOf(

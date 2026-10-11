@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Headless Ghidra MCP JavaScript dispatch recovery
+
+- Execute full GhidraScript bodies on the headless worker request thread, not Swing EDT. Keep EDT dispatch in GUI mode and execute directly if the caller is already on EDT.
+- Add dispatch regression tests for headless thread ownership, GUI EDT routing, GUI reentrancy and script exception propagation.
+- Local Ghidra 12.1.3 headless REST integration on a cloned, byte-verified 115-function PCM project: JavaScript HTTP read-only probe passed, Type-12 negative-SE migration changed C warnings 1/2→0/0 while preserving all eight GM5 loops, and `/save_program` succeeded. A freshly started second local MCP server independently reopened the saved project and verified context at all three native sites, unchanged bytes, correct P-code, zero warnings, eight loops and all 115 functions. This is local runtime acceptance; deployed server and canonical Analysis remain independently unverified.
+
 ### Sunplus DSP: saved-state PCM negative-SE migration acceptance (local-only)
 
 - Added guarded Java scripts for exact three-site Type-12 negative-SE metadata migration and independent verification after saving and reopening the original 115-function PCM project in a separate Ghidra 12.1.3 headless process.
