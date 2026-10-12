@@ -6,6 +6,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus codec sequential-CE decompiler recovery
+
+- Add opt-in direct PM backedge decode context for native counted loops whose endpoints and starts are statically verified, avoiding unrecovered indirect jump tables across DSP CALLs.
+- Add a self-contained 54-byte two-loop/CALL regression, guarded PCM 115-function GZF migration and independent post-save readback scripts. Local Ghidra 12.1.3 acceptance verifies two restored PCM C loops, eight unchanged GM5 loops, unchanged PM bytes and saved function metadata.
+- Existing programs require targeted instruction re-disassembly with preserved annotations; no automatic whole-profile reanalysis or source-byte mutation is performed.
+
 ### Headless Ghidra MCP JavaScript dispatch recovery
 
 - Execute full GhidraScript bodies on the headless worker request thread, not Swing EDT. Keep EDT dispatch in GUI mode and execute directly if the caller is already on EDT.
