@@ -402,6 +402,6 @@ def test_codec_sequential_ce_with_static_direct_backedges() -> None:
     script = (ROOT / "ghidra_scripts/SunplusPcmSequentialCeLoopAcceptance.java").read_text()
     assert "SUNPLUS_SEQUENTIAL_CE_ACCEPTANCE=PASS" in script
     assert 'new String[][]{{"07a7","07a7"},{"07b2","07ae"}}' in script
-    workflow = (ROOT / ".github/workflows/tests.yml").read_text()
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
     assert "Verify Sunplus sequential CE loops across resident call" in workflow
     assert "SunplusPcmSequentialCeLoopAcceptance.java" in workflow
