@@ -21,8 +21,8 @@ services:
       - koba-artifacts:/artifacts
     mem_limit: 3g
     memswap_limit: 3g
-    cpus: 3
-    pids_limit: 512
+    cpus: 6
+    pids_limit: 768
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8089/check_connection"]
       interval: 30s
@@ -49,10 +49,6 @@ services:
       GHIDRA_MCP_TRUSTED_HOSTS: "ghidra"
       GHIDRA_MCP_ALLOWED_HOSTS: "ghidra-mcp,bridge,localhost,127.0.0.1"
       GHIDRA_MCP_SESSION_SETTINGS_PATH: "/data/bridge/project_session_settings.json"
-    mem_limit: 512m
-    memswap_limit: 512m
-    cpus: 1
-    pids_limit: 128
     depends_on:
       ghidra:
         condition: service_healthy

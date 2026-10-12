@@ -6,11 +6,6 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
-### Production memory containment
-
-- Reduce the headless Ghidra pool from five 1500 MiB-heap JVMs to two 1024 MiB-heap JVMs, align the bridge's worker URLs and maximum concurrency, and cap the Java container at 3 GiB RAM without additional swap.
-- Bound the lightweight Python bridge at 512 MiB RAM without swap. Cap CPU and PIDs to avoid host contention. Large analyses can now hit a container OOM rather than exhaust host memory.
-
 ### Sunplus codec sequential-CE decompiler recovery
 
 - Add opt-in direct PM backedge decode context for native counted loops whose endpoints and starts are statically verified, avoiding unrecovered indirect jump tables across DSP CALLs.
