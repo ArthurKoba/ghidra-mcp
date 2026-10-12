@@ -384,3 +384,24 @@ def test_pm24_dynamic_accesses_use_lossless_width_callother_interfaces() -> None
     assert "SUNPLUS_CODEC_FULL_C_ACCEPTANCE=PASS" in acceptance
     assert "decompileCompleted()" in acceptance
     assert "currentProgram.getFunctionManager().getFunctionCount()" in acceptance
+
+
+def test_codec_sequential_ce_with_static_direct_backedges() -> None:
+    text = SLASPEC.read_text()
+    assert "codec_ce_direct_backedge=(8,8) noflow" in text
+    assert "codec_ce_direct_start=(9,24) noflow" in text
+    assert "codecDirectLoopStart:" in text
+    assert "goto codecDirectLoopStart;" in text
+    assert "codec_ce_direct_backedge=0 & codec_ce_nested_mode=0" in text
+    fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/pcm_sequential_ce_07a4.bin"
+    content = fixture.read_bytes()
+    assert len(content) == 54
+    assert content[6:9].hex() == "147a7e"
+    assert content[27:30].hex() == "147b2e"
+    assert content[-3:].hex() == "0a000f"
+    script = (ROOT / "ghidra_scripts/SunplusPcmSequentialCeLoopAcceptance.java").read_text()
+    assert "SUNPLUS_SEQUENTIAL_CE_ACCEPTANCE=PASS" in script
+    assert 'new String[][]{{"07a7","07a7"},{"07b2","07ae"}}' in script
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "Verify Sunplus sequential CE loops across resident call" in workflow
+    assert "SunplusPcmSequentialCeLoopAcceptance.java" in workflow

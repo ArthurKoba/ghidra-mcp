@@ -93,6 +93,9 @@ define context DSPCTX
     codec_ce_nested_mode=(4,4) noflow
     codec_ce_static_depth=(5,6) noflow
     codec_se_proven_negative=(7,7) noflow
+    # Scoped analysis-only direct CE target for statically proved loop ends.
+    codec_ce_direct_backedge=(8,8) noflow
+    codec_ce_direct_start=(9,24) noflow
 ;
 
 define token inst24(24) endian = big
@@ -641,8 +644,24 @@ macro codec_call_return() {
 # the block-end instruction executes first, then CE counter/back-edge.
 # Kept separate from the specialized srvdsp PM:186C implementation.
 codecLoopStart: is epsilon { export *:2 DSP_LOOP_START; }
+codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
+    export *[PM]:2 codec_ce_direct_start;
+}
+# A proven direct backedge stays analyzable even across a resident CALL:
+# runtime DSP_LOOP_START is held on silicon, but the decompiler need not
+# infer its value across a callee whose ABI cannot establish preservation.
+# This path is opt-in for individually verified DO/end instruction pairs.
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <codec_ce_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_direct_done>
+    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
+    CNTR = DSP_LOOP_COUNT_SHADOW;
+}
 # Keep the proven lightweight single-loop C recovery as the default.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <simple_done>;
@@ -652,14 +671,14 @@ codecLoopStart: is epsilon { export *:2 DSP_LOOP_START; }
     CNTR = DSP_LOOP_COUNT_SHADOW;
 }
 # EXPERIMENT: deterministic two-level CE endpoints for CFG recovery.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_outer_done>;
     goto [DSP_STATIC_START_OUTER];
 <static_outer_done>
 }
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_inner_done>;
@@ -668,7 +687,7 @@ codecLoopStart: is epsilon { export *:2 DSP_LOOP_START; }
     CNTR = DSP_STATIC_CNTR_OUTER;
 }
 # Expanded stack handling is selected only for proven nested DO regions.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_done>;

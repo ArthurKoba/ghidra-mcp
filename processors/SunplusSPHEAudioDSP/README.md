@@ -189,3 +189,24 @@ The preferred upstream test strategy is synthetic instruction/regression fixture
 
 An independent reviewer pass is required before treating the implementation as upstream-ready.
 
+
+
+### Static CE edges after resident calls (scoped opt-in)
+
+For individually proved native codec DO/end pairs, `codec_ce_direct_backedge=1`
+and `codec_ce_direct_start` record the actual **backedge PM word address** in
+Ghidra's *analysis-only* decode context. This emits a direct CFG edge instead
+of depending on a synthetic loop-start register that the decompiler may treat
+as clobbered by an intervening DSP `CALL`.
+
+The 54-byte sequential-CE fixture exercises two consecutive loops (one
+contains a native `CALL`) and requires **two actual C `do` loops**, not a
+combined count of the `do` and `while` keywords. This is a Ghidra C/CFG
+acceptance contract; it does not prove hardware cycle timing.
+
+Do not enable the direct-backedge mode globally or infer a target from
+instruction order. Confirm each target in the native `DO` and set the
+context before decoding its CE end. For previously analyzed programs, use a
+scoped transaction to clear and re-disassemble only the verified instructions;
+preserve functions, comments, bytes and non-synthetic references. An existing
+saved program does not automatically acquire new P-code after SLEIGH changes.

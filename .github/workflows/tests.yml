@@ -67,6 +67,7 @@ jobs:
         mkdir -p /tmp/sunplus-dsp-test-scripts
         cp ghidra_scripts/SunplusDSPDecodeSmoke.java \
            ghidra_scripts/SunplusDSPCeLoopRegression.java \
+           ghidra_scripts/SunplusPcmSequentialCeLoopAcceptance.java \
            ghidra_scripts/SunplusNestedCeLoopAcceptance.java \
            ghidra_scripts/SunplusNestedCallCeAcceptance.java \
            ghidra_scripts/SunplusConditionalCeCallAcceptance.java \
@@ -76,7 +77,7 @@ jobs:
            ghidra_scripts/SunplusSrvdspAnalyze.java \
            ghidra_scripts/SunplusSrvdspAcceptance.java \
            /tmp/sunplus-dsp-test-scripts/
-        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 10
+        test "$(find /tmp/sunplus-dsp-test-scripts -maxdepth 1 -name '*.java' | wc -l)" -eq 11
 
     - name: Instantiate Sunplus SPHE audio-DSP language
       run: |
@@ -117,6 +118,27 @@ jobs:
           tail -n 80 /tmp/sunplus-dsp-pcm.log
           exit 1
         }
+
+    - name: Verify Sunplus sequential CE loops across resident call
+      run: |
+        GHIDRA_DIR=$(find /tmp/ghidra -maxdepth 1 -type d -name 'ghidra_*' | head -1)
+        mkdir -p /tmp/sunplus-sequential-ce-projects
+        "$GHIDRA_DIR/support/analyzeHeadless" \
+          /tmp/sunplus-sequential-ce-projects sunplus-sequential-ce \
+          -import tests/fixtures/sunplus_sphe_audio_dsp/pcm_sequential_ce_07a4.bin \
+          -loader BinaryLoader -loader-baseAddr 0x7a4 \
+          -processor "SunplusSPHEAudioDSP:BE:16:default" -cspec default \
+          -noanalysis -scriptPath /tmp/sunplus-dsp-test-scripts \
+          -postScript SunplusPcmSequentialCeLoopAcceptance.java \
+          -deleteProject > /tmp/sunplus-sequential-ce.log 2>&1
+        grep -F 'SUNPLUS_SEQUENTIAL_CE_ACCEPTANCE=PASS' /tmp/sunplus-sequential-ce.log || {
+          tail -n 80 /tmp/sunplus-sequential-ce.log
+          exit 1
+        }
+        if grep -Eq 'REPORT SCRIPT ERROR|ERROR Abort' /tmp/sunplus-sequential-ce.log; then
+          echo "Sequential CE Ghidra script reported a failure"
+          exit 1
+        fi
 
     - name: Verify Sunplus bounded nested CE loops
       run: |
