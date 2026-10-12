@@ -19,7 +19,7 @@ def test_worker_pool_urls_match_worker_count_and_exposed_ports() -> None:
     count = int(_quoted_env("GHIDRA_MCP_WORKER_COUNT"))
     urls = [item.strip() for item in _quoted_env("GHIDRA_MCP_WORKER_URLS").split(",")]
 
-    assert count == 5
+    assert count == 2
     assert len(urls) == count
 
     ports = [int(url.rsplit(":", 1)[1]) for url in urls]
