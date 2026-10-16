@@ -202,12 +202,30 @@ def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> dict[str, Any
             os.close(fd)
     except OSError as exc:
         raise project_sessions.ProjectSessionError("Worker supervisor unavailable") from exc
+    # A FIFO write only queues work. Verify that the supervisor persisted
+    # the desired value before reporting successful configuration.
+    heap_file = _worker_pid_file(worker_index).with_suffix(".heap-mb")
+    deadline = time.monotonic() + 2.0
+    persisted = False
+    while time.monotonic() < deadline:
+        try:
+            persisted = heap_file.read_text(encoding="utf-8").strip() == str(max_heap_mb)
+        except OSError:
+            persisted = False
+        if persisted:
+            break
+        time.sleep(0.05)
+    if not persisted:
+        raise project_sessions.ProjectSessionError(
+            f"Supervisor did not confirm the heap override for worker {worker_index}"
+        )
     return {
         "worker_index": worker_index,
         "worker_url": slot.url,
-        "requested_max_heap_mb": max_heap_mb,
+        "configured_max_heap_mb": max_heap_mb,
+        "persisted": True,
         "restart_requested": True,
-        "note": "Change is pending until JVM restart. JVM RSS can exceed Xmx.",
+        "note": "Saved -Xmx override; active JVM startup and physical RSS remain separately unverified.",
     }
 
 
