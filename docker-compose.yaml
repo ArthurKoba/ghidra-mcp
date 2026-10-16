@@ -24,7 +24,9 @@ services:
     cpus: 6
     pids_limit: 768
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8089/check_connection"]
+      # Worker 0 may be intentionally hard-stopped while the supervisor and
+      # remaining workers stay operational. Probe the control plane instead.
+      test: ["CMD-SHELL", "test -p /data/bridge/worker-control.fifo && kill -0 1"]
       interval: 30s
       timeout: 10s
       start_period: 90s
