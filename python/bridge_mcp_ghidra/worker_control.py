@@ -38,6 +38,10 @@ def set_worker_enabled(
         slot = _slot(worker_index)
 
         if enabled:
+            if _worker_pid_file(worker_index).with_suffix(".stopped").exists():
+                raise project_sessions.ProjectSessionError(
+                    f"Worker {worker_index} is physically stopped; call start_worker"
+                )
             slot.enabled = True
             return {
                 **project_sessions._slot_status(worker_index, slot),
@@ -162,6 +166,158 @@ def _request_worker_restart(worker_index: int, worker_url: str) -> tuple[str, in
         timeout=1,
     )
     return "native-exit", previous_pid
+
+
+def worker_heap_settings(worker_index: int) -> dict[str, Any]:
+    """Read persisted per-worker heap override, without asserting active JVM RSS."""
+    slot = _slot(worker_index)
+    heap_file = _worker_pid_file(worker_index).with_suffix(".heap-mb")
+    try:
+        raw = heap_file.read_text(encoding="utf-8").strip()
+        value = int(raw) if raw.isdecimal() else None
+    except OSError:
+        value = None
+    return {
+        "worker_index": worker_index,
+        "worker_url": slot.url,
+        "configured_max_heap_mb": value,
+        "override_present": value is not None,
+        "note": "This is a saved -Xmx override, not measured JVM RSS/cgroup usage.",
+    }
+
+
+def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> dict[str, Any]:
+    """Persist a JVM heap ceiling through the owning supervisor."""
+    if type(max_heap_mb) is not int or not 128 <= max_heap_mb <= 32768:
+        raise project_sessions.ProjectSessionError("max_heap_mb must be 128..32768")
+    slot = _slot(worker_index)
+    fifo = _worker_control_fifo()
+    try:
+        if not stat.S_ISFIFO(fifo.stat().st_mode):
+            raise project_sessions.ProjectSessionError("Worker supervisor FIFO unavailable")
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, f"heap {worker_index} {max_heap_mb}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise project_sessions.ProjectSessionError("Worker supervisor unavailable") from exc
+    # A FIFO write only queues work. Verify that the supervisor persisted
+    # the desired value before reporting successful configuration.
+    heap_file = _worker_pid_file(worker_index).with_suffix(".heap-mb")
+    deadline = time.monotonic() + 2.0
+    persisted = False
+    while time.monotonic() < deadline:
+        try:
+            persisted = heap_file.read_text(encoding="utf-8").strip() == str(max_heap_mb)
+        except OSError:
+            persisted = False
+        if persisted:
+            break
+        time.sleep(0.05)
+    if not persisted:
+        raise project_sessions.ProjectSessionError(
+            f"Supervisor did not confirm the heap override for worker {worker_index}"
+        )
+    return {
+        "worker_index": worker_index,
+        "worker_url": slot.url,
+        "configured_max_heap_mb": max_heap_mb,
+        "persisted": True,
+        "restart_requested": True,
+        "note": "Saved -Xmx override; active JVM startup and physical RSS remain separately unverified.",
+    }
+
+
+def _send_supervisor_command(worker_index: int, action: str) -> None:
+    _slot(worker_index)
+    fifo = _worker_control_fifo()
+    if action not in {"stop", "start"}:
+        raise ValueError("Unsupported supervisor action")
+    try:
+        if not stat.S_ISFIFO(fifo.stat().st_mode):
+            raise project_sessions.ProjectSessionError("Worker supervisor FIFO unavailable")
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, f"{action} {worker_index}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise project_sessions.ProjectSessionError("Worker supervisor unavailable") from exc
+
+
+async def hard_stop_worker(worker_index: int, timeout_seconds: float = 4.0) -> dict[str, Any]:
+    """Disable routing, SIGKILL the selected JVM and wait for supervisor reaping."""
+    worker_url, previous_enabled, previous_project_id, previous_project_name = await state.run_in_worker(
+        _prepare_recovery, worker_index
+    )
+    previous_pid = await state.run_in_worker(_read_worker_pid, worker_index)
+    try:
+        await state.run_in_worker(_send_supervisor_command, worker_index, "stop")
+    except (project_sessions.ProjectSessionError, OSError):
+        await state.run_in_worker(
+            _finish_recovery, worker_index, worker_url, previous_enabled
+        )
+        raise
+    try:
+        cancelled = await asyncio.wait_for(
+            operation_queue.cancel(worker_url, include_running=True), timeout=1.0
+        )
+    except TimeoutError:
+        cancelled = {"cancellation_pending": True}
+    await state.run_in_worker(_reset_slot_after_cancel, worker_url)
+    deadline = time.monotonic() + min(10.0, max(1.0, float(timeout_seconds)))
+    while time.monotonic() < deadline:
+        pid = await state.run_in_worker(_read_worker_pid, worker_index)
+        if pid is None:
+            with project_sessions._lock:
+                slot = project_sessions._slots[worker_url]
+                slot.enabled = False
+                slot.error = "stopped"
+            return {
+                "worker_index": worker_index,
+                "stopped": True,
+                "previous_pid": previous_pid,
+                "previous_project_id": previous_project_id,
+                "previous_project_name": previous_project_name,
+                **cancelled,
+            }
+        await asyncio.sleep(0.05)
+    with project_sessions._lock:
+        project_sessions._slots[worker_url].error = "stop unconfirmed"
+    raise project_sessions.ProjectSessionError(
+        f"Worker {worker_index} did not confirm SIGKILL/reap within the timeout"
+    )
+
+
+async def start_worker(worker_index: int, timeout_seconds: float = 10.0) -> dict[str, Any]:
+    """Re-enable the selected supervisor-managed JVM and prove it is healthy."""
+    slot = await state.run_in_worker(_slot, worker_index)
+    with project_sessions._lock:
+        previous_enabled, previous_error = slot.enabled, slot.error
+        slot.enabled = False
+        slot.error = "starting"
+    try:
+        await state.run_in_worker(_send_supervisor_command, worker_index, "start")
+    except (project_sessions.ProjectSessionError, OSError):
+        with project_sessions._lock:
+            slot.enabled, slot.error = previous_enabled, previous_error
+        raise
+    deadline = time.monotonic() + min(30.0, max(1.0, float(timeout_seconds)))
+    while time.monotonic() < deadline:
+        pid = await state.run_in_worker(_read_worker_pid, worker_index)
+        healthy = pid is not None and await state.run_in_worker(_worker_healthy, slot.url)
+        if healthy:
+            with project_sessions._lock:
+                slot.enabled = True
+                slot.error = None
+            return {"worker_index": worker_index, "started": True, "pid": pid}
+        await asyncio.sleep(0.1)
+    with project_sessions._lock:
+        slot.error = "start unconfirmed"
+    raise project_sessions.ProjectSessionError(
+        f"Worker {worker_index} did not become healthy within the timeout"
+    )
 
 
 def _worker_healthy(worker_url: str) -> bool:

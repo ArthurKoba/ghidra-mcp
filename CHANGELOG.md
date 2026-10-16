@@ -6,6 +6,13 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Headless worker supervisor controls (source candidate, not deployed)
+
+- Add MCP `set_worker_max_heap_mb` and `worker_heap_settings` for persistent per-worker JVM heap overrides from 128 to 32768 MiB, applied on supervised JVM restart. The setting is a JVM `-Xmx` ceiling, not a total-process RSS/cgroup memory limit; the existing container budget is unchanged.
+- Add `hard_stop_worker` to SIGKILL a selected supervised headless worker, cancel its queued/running bridge tasks and keep the JVM stopped; `start_worker` explicitly restores the slot and requires a healthy backend. A persistent per-worker stop marker prevents automatic resurrection during supervisor restart.
+- Existing `recover_worker` remains the explicit kill-and-restart path. Ordinary maintenance disable still only disables routing; attempting to enable a physically stopped worker requires `start_worker`.
+- Validation: Python compilation and Bash syntax checks passed; isolated two-worker fake-JVM supervisor tests verified stop, non-respawn, heap persistence, explicit restart and unaffected peer worker. Real Ghidra JVM integration, bridge-to-supervisor authorization, Docker rebuild and Development deployment are untested. The direct single-worker exec mode does not expose these supervisor-only controls.
+
 ### Sunplus codec sequential-CE decompiler recovery
 
 - Add opt-in direct PM backedge decode context for native counted loops whose endpoints and starts are statically verified, avoiding unrecovered indirect jump tables across DSP CALLs.

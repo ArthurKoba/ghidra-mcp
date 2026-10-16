@@ -79,6 +79,7 @@ WORKER_COUNT=${GHIDRA_MCP_WORKER_COUNT:-1}
 WORKER_JAVA_OPTS=${GHIDRA_MCP_WORKER_JAVA_OPTS:-${JAVA_OPTS}}
 WORKER_CONTROL_FIFO=${GHIDRA_MCP_WORKER_CONTROL_FIFO:-/data/bridge/worker-control.fifo}
 WORKER_PID_DIR=${GHIDRA_MCP_WORKER_PID_DIR:-/data/bridge/workers}
+SUPERVISOR_MAIN_PID="${BASHPID}"
 
 if ! [[ "${WORKER_COUNT}" =~ ^[1-9][0-9]*$ ]]; then
     echo -e "${RED}Error: GHIDRA_MCP_WORKER_COUNT must be a positive integer${NC}"
@@ -120,11 +121,27 @@ start_worker() {
 
     mkdir -p "${worker_home}" "${worker_cache}"
 
+    local heap_file="${WORKER_PID_DIR}/worker-${index}.heap-mb"
+    local -a java_args=()
+    read -r -a java_args <<< "${WORKER_JAVA_OPTS}"
+    if [ -f "${heap_file}" ]; then
+        local heap_mb
+        heap_mb=$(cat "${heap_file}")
+        if [[ "${heap_mb}" =~ ^[0-9]+$ ]] && (( heap_mb >= 128 && heap_mb <= 32768 )); then
+            local -a filtered=()
+            local option
+            for option in "${java_args[@]}"; do
+                [[ "${option}" == -Xmx* ]] || filtered+=("${option}")
+            done
+            java_args=("${filtered[@]}" "-Xmx${heap_mb}m")
+        fi
+    fi
+
     echo -e "${GREEN}Starting worker ${index} on port ${worker_port}...${NC}"
     HOME="${worker_home}" \
     GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
     java \
-        ${WORKER_JAVA_OPTS} \
+        "${java_args[@]}" \
         ${USER_OPT} \
         -Duser.home="${worker_home}" \
         -Dghidra.home="${GHIDRA_HOME}" \
@@ -176,10 +193,34 @@ worker_control_loop() {
     while [ "${SHUTTING_DOWN}" -eq 0 ]; do
         local action=""
         local index=""
-        if ! read -r action index <&9; then
+        local value=""
+        if ! read -r action index value <&9; then
             continue
         fi
-        if [ "${action}" != "restart" ] || ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
+        if ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
+            echo "Ignoring invalid worker index: ${index}"
+            continue
+        fi
+        local stopped_file="${WORKER_PID_DIR}/worker-${index}.stopped"
+        if [ "${action}" = "stop" ]; then
+            : > "${stopped_file}"
+        elif [ "${action}" = "start" ]; then
+            rm -f "${stopped_file}"
+            kill -USR1 "${SUPERVISOR_MAIN_PID}" 2>/dev/null || true
+            continue
+        elif [ "${action}" = "restart" ]; then
+            rm -f "${stopped_file}"
+            kill -USR1 "${SUPERVISOR_MAIN_PID}" 2>/dev/null || true
+        elif [ "${action}" = "heap" ]; then
+            if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 128 || value > 32768 )); then
+                echo "Ignoring invalid worker heap: ${value}"
+                continue
+            fi
+            local heap_file="${WORKER_PID_DIR}/worker-${index}.heap-mb"
+            local temp_file="${heap_file}.tmp.${BASHPID}"
+            printf '%s\n' "${value}" > "${temp_file}"
+            mv -f "${temp_file}" "${heap_file}"
+        else
             echo -e "${YELLOW}Ignoring invalid worker control command: ${action} ${index}${NC}"
             continue
         fi
@@ -217,6 +258,7 @@ cleanup() {
 }
 
 trap 'cleanup; exit 0' SIGTERM SIGINT
+trap ':' SIGUSR1
 trap cleanup EXIT
 
 setup_worker_control
@@ -224,15 +266,29 @@ worker_control_loop &
 CONTROL_PID="$!"
 
 for ((i=0; i<WORKER_COUNT; i++)); do
-    start_worker "${i}"
+    if [ -f "${WORKER_PID_DIR}/worker-${i}.stopped" ]; then
+        PIDS["${i}"]=""
+    else
+        start_worker "${i}"
+    fi
 done
 
 # Supervise each worker independently. A clean /exit_ghidra request or a crash
 # restarts only that JVM; other project sessions remain available.
 while [ "${SHUTTING_DOWN}" -eq 0 ]; do
+    # Empty slots represent deliberately stopped JVMs; never wait on them.
+    WAIT_PIDS=()
+    for pid in "${PIDS[@]}"; do
+        [ -z "${pid}" ] || WAIT_PIDS+=("${pid}")
+    done
+    if [ "${#WAIT_PIDS[@]}" -eq 0 ]; then
+        sleep 0.2
+    fi
     EXITED_PID=""
     set +e
-    wait -n -p EXITED_PID "${PIDS[@]}"
+    if [ "${#WAIT_PIDS[@]}" -gt 0 ]; then
+        wait -n -p EXITED_PID "${WAIT_PIDS[@]}"
+    fi
     STATUS=$?
     set -e
     if [ "${SHUTTING_DOWN}" -eq 1 ]; then
@@ -246,12 +302,20 @@ while [ "${SHUTTING_DOWN}" -eq 0 ]; do
             break
         fi
     done
-    if [ -z "${EXITED_INDEX}" ]; then
-        echo -e "${RED}Unknown Ghidra worker exited pid=${EXITED_PID:-unknown} status=${STATUS}.${NC}"
-        sleep 1
-        continue
+    if [ -n "${EXITED_INDEX}" ]; then
+        PIDS["${EXITED_INDEX}"]=""
+        rm -f "${WORKER_PID_DIR}/worker-${EXITED_INDEX}.pid"
+        if [ -f "${WORKER_PID_DIR}/worker-${EXITED_INDEX}.stopped" ]; then
+            echo "Worker ${EXITED_INDEX} stopped (status ${STATUS}); keeping it stopped."
+        else
+            echo "Worker ${EXITED_INDEX} exited (status ${STATUS}); restarting it."
+        fi
     fi
-
-    echo -e "${YELLOW}Worker ${EXITED_INDEX} exited (status ${STATUS}); restarting only that worker.${NC}"
-    start_worker "${EXITED_INDEX}"
+    # Wakeups from the control FIFO can interrupt wait -n with no exited PID.
+    # Also restart explicitly re-enabled slots with no running JVM.
+    for ((i=0; i<WORKER_COUNT; i++)); do
+        if [ -z "${PIDS[$i]:-}" ] && [ ! -f "${WORKER_PID_DIR}/worker-${i}.stopped" ]; then
+            start_worker "${i}"
+        fi
+    done
 done

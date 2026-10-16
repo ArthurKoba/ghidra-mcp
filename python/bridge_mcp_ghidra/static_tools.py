@@ -161,6 +161,57 @@ async def recover_worker(worker_index: int, timeout_seconds: float = 4.0) -> str
 
 
 @mcp.tool()
+async def worker_heap_settings(worker_index: int) -> str:
+    """Read the persisted -Xmx override for a worker; not physical RAM usage."""
+    try:
+        return json.dumps(
+            await state.run_in_worker(worker_control.worker_heap_settings, worker_index),
+            indent=2,
+        )
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> str:
+    """Set a persistent per-worker JVM -Xmx ceiling in MiB (128..32768).
+
+    This is not a Docker/cgroup RSS bound. Changing it kills the active worker.
+    """
+    try:
+        result = await state.run_in_worker(
+            worker_control.set_worker_max_heap_mb,
+            worker_index,
+            max_heap_mb,
+        )
+        return json.dumps(result, indent=2)
+    except (project_sessions.ProjectSessionError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def hard_stop_worker(worker_index: int, timeout_seconds: float = 4.0) -> str:
+    """SIGKILL one supervised Ghidra worker and keep it stopped until explicitly started."""
+    try:
+        return json.dumps(
+            await worker_control.hard_stop_worker(worker_index, timeout_seconds), indent=2
+        )
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+async def start_worker(worker_index: int, timeout_seconds: float = 10.0) -> str:
+    """Start a physically stopped supervised Ghidra JVM and restore project routing."""
+    try:
+        return json.dumps(
+            await worker_control.start_worker(worker_index, timeout_seconds), indent=2
+        )
+    except project_sessions.ProjectSessionError as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 async def project_session_settings() -> str:
     """Return effective persistent project-session lifecycle settings."""
     return json.dumps(session_settings.get_settings(), indent=2)
