@@ -164,6 +164,31 @@ def _request_worker_restart(worker_index: int, worker_url: str) -> tuple[str, in
     return "native-exit", previous_pid
 
 
+def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> dict[str, Any]:
+    """Persist a JVM heap ceiling through the owning supervisor."""
+    if type(max_heap_mb) is not int or not 128 <= max_heap_mb <= 32768:
+        raise project_sessions.ProjectSessionError("max_heap_mb must be 128..32768")
+    slot = _slot(worker_index)
+    fifo = _worker_control_fifo()
+    try:
+        if not stat.S_ISFIFO(fifo.stat().st_mode):
+            raise project_sessions.ProjectSessionError("Worker supervisor FIFO unavailable")
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, f"heap {worker_index} {max_heap_mb}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise project_sessions.ProjectSessionError("Worker supervisor unavailable") from exc
+    return {
+        "worker_index": worker_index,
+        "worker_url": slot.url,
+        "requested_max_heap_mb": max_heap_mb,
+        "restart_requested": True,
+        "note": "Change is pending until JVM restart. JVM RSS can exceed Xmx.",
+    }
+
+
 def _worker_healthy(worker_url: str) -> bool:
     try:
         text, status = transport.do_request(

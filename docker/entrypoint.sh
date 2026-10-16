@@ -120,6 +120,22 @@ start_worker() {
 
     mkdir -p "${worker_home}" "${worker_cache}"
 
+    local heap_file="${WORKER_PID_DIR}/worker-${index}.heap-mb"
+    local -a java_args=()
+    read -r -a java_args <<< "${WORKER_JAVA_OPTS}"
+    if [ -f "${heap_file}" ]; then
+        local heap_mb
+        heap_mb=$(cat "${heap_file}")
+        if [[ "${heap_mb}" =~ ^[0-9]+$ ]] && (( heap_mb >= 128 && heap_mb <= 32768 )); then
+            local -a filtered=()
+            local option
+            for option in "${java_args[@]}"; do
+                [[ "${option}" == -Xmx* ]] || filtered+=("${option}")
+            done
+            java_args=("${filtered[@]}" "-Xmx${heap_mb}m")
+        fi
+    fi
+
     echo -e "${GREEN}Starting worker ${index} on port ${worker_port}...${NC}"
     HOME="${worker_home}" \
     GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
@@ -146,7 +162,7 @@ if [ "${WORKER_COUNT}" -eq 1 ]; then
     echo -e "${GREEN}Starting single Ghidra worker...${NC}"
     exec env HOME="${worker_home}" GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
         java \
-        ${WORKER_JAVA_OPTS} \
+        "${java_args[@]}" \
         ${USER_OPT} \
         -Duser.home="${worker_home}" \
         -Dghidra.home="${GHIDRA_HOME}" \
@@ -176,10 +192,24 @@ worker_control_loop() {
     while [ "${SHUTTING_DOWN}" -eq 0 ]; do
         local action=""
         local index=""
-        if ! read -r action index <&9; then
+        local value=""
+        if ! read -r action index value <&9; then
             continue
         fi
-        if [ "${action}" != "restart" ] || ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
+        if ! [[ "${index}" =~ ^[0-9]+$ ]] || [ "${index}" -ge "${WORKER_COUNT}" ]; then
+            echo "Ignoring invalid worker index: ${index}"
+            continue
+        fi
+        if [ "${action}" = "heap" ]; then
+            if ! [[ "${value}" =~ ^[0-9]+$ ]] || (( value < 128 || value > 32768 )); then
+                echo "Ignoring invalid worker heap: ${value}"
+                continue
+            fi
+            local heap_file="${WORKER_PID_DIR}/worker-${index}.heap-mb"
+            local temp_file="${heap_file}.tmp.$"
+            printf '%s\n' "${value}" > "${temp_file}"
+            mv -f "${temp_file}" "${heap_file}"
+        elif [ "${action}" != "restart" ]; then
             echo -e "${YELLOW}Ignoring invalid worker control command: ${action} ${index}${NC}"
             continue
         fi

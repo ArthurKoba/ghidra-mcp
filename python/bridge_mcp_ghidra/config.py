@@ -105,6 +105,7 @@ MANAGEMENT_TOOL_NAMES = {
     "set_worker_enabled",
     "clear_worker_queue",
     "recover_worker",
+    "set_worker_max_heap_mb",
     "list_tool_groups",
     "load_tool_group",
     "unload_tool_group",

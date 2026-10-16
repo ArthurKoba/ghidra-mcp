@@ -161,6 +161,23 @@ async def recover_worker(worker_index: int, timeout_seconds: float = 4.0) -> str
 
 
 @mcp.tool()
+async def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> str:
+    """Set a persistent per-worker JVM -Xmx ceiling in MiB (128..32768).
+
+    This is not a Docker/cgroup RSS bound. Changing it kills the active worker.
+    """
+    try:
+        result = await state.run_in_worker(
+            worker_control.set_worker_max_heap_mb,
+            worker_index,
+            max_heap_mb,
+        )
+        return json.dumps(result, indent=2)
+    except (project_sessions.ProjectSessionError, OSError) as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
 async def project_session_settings() -> str:
     """Return effective persistent project-session lifecycle settings."""
     return json.dumps(session_settings.get_settings(), indent=2)
