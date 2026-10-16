@@ -140,7 +140,7 @@ start_worker() {
     HOME="${worker_home}" \
     GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
     java \
-        ${WORKER_JAVA_OPTS} \
+        "${java_args[@]}" \
         ${USER_OPT} \
         -Duser.home="${worker_home}" \
         -Dghidra.home="${GHIDRA_HOME}" \
@@ -162,7 +162,7 @@ if [ "${WORKER_COUNT}" -eq 1 ]; then
     echo -e "${GREEN}Starting single Ghidra worker...${NC}"
     exec env HOME="${worker_home}" GHIDRA_MCP_SCRIPT_CACHE="${worker_cache}" \
         java \
-        "${java_args[@]}" \
+        ${WORKER_JAVA_OPTS} \
         ${USER_OPT} \
         -Duser.home="${worker_home}" \
         -Dghidra.home="${GHIDRA_HOME}" \
@@ -206,7 +206,7 @@ worker_control_loop() {
                 continue
             fi
             local heap_file="${WORKER_PID_DIR}/worker-${index}.heap-mb"
-            local temp_file="${heap_file}.tmp.$"
+            local temp_file="${heap_file}.tmp.${BASHPID}"
             printf '%s\n' "${value}" > "${temp_file}"
             mv -f "${temp_file}" "${heap_file}"
         elif [ "${action}" != "restart" ]; then
