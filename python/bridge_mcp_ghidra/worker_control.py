@@ -189,6 +189,85 @@ def set_worker_max_heap_mb(worker_index: int, max_heap_mb: int) -> dict[str, Any
     }
 
 
+def _send_supervisor_command(worker_index: int, action: str) -> None:
+    _slot(worker_index)
+    fifo = _worker_control_fifo()
+    if action not in {"stop", "start"}:
+        raise ValueError("Unsupported supervisor action")
+    try:
+        if not stat.S_ISFIFO(fifo.stat().st_mode):
+            raise project_sessions.ProjectSessionError("Worker supervisor FIFO unavailable")
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        try:
+            os.write(fd, f"{action} {worker_index}\n".encode("ascii"))
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        raise project_sessions.ProjectSessionError("Worker supervisor unavailable") from exc
+
+
+async def hard_stop_worker(worker_index: int, timeout_seconds: float = 4.0) -> dict[str, Any]:
+    """Disable routing, SIGKILL the selected JVM and wait for supervisor reaping."""
+    worker_url, _, previous_project_id, previous_project_name = await state.run_in_worker(
+        _prepare_recovery, worker_index
+    )
+    previous_pid = await state.run_in_worker(_read_worker_pid, worker_index)
+    await state.run_in_worker(_send_supervisor_command, worker_index, "stop")
+    try:
+        cancelled = await asyncio.wait_for(
+            operation_queue.cancel(worker_url, include_running=True), timeout=1.0
+        )
+    except TimeoutError:
+        cancelled = {"cancellation_pending": True}
+    await state.run_in_worker(_reset_slot_after_cancel, worker_url)
+    deadline = time.monotonic() + min(10.0, max(1.0, float(timeout_seconds)))
+    while time.monotonic() < deadline:
+        pid = await state.run_in_worker(_read_worker_pid, worker_index)
+        if pid is None:
+            with project_sessions._lock:
+                slot = project_sessions._slots[worker_url]
+                slot.enabled = False
+                slot.error = "stopped"
+            return {
+                "worker_index": worker_index,
+                "stopped": True,
+                "previous_pid": previous_pid,
+                "previous_project_id": previous_project_id,
+                "previous_project_name": previous_project_name,
+                **cancelled,
+            }
+        await asyncio.sleep(0.05)
+    with project_sessions._lock:
+        project_sessions._slots[worker_url].error = "stop unconfirmed"
+    raise project_sessions.ProjectSessionError(
+        f"Worker {worker_index} did not confirm SIGKILL/reap within the timeout"
+    )
+
+
+async def start_worker(worker_index: int, timeout_seconds: float = 10.0) -> dict[str, Any]:
+    """Re-enable the selected supervisor-managed JVM and prove it is healthy."""
+    slot = await state.run_in_worker(_slot, worker_index)
+    with project_sessions._lock:
+        slot.enabled = False
+        slot.error = "starting"
+    await state.run_in_worker(_send_supervisor_command, worker_index, "start")
+    deadline = time.monotonic() + min(30.0, max(1.0, float(timeout_seconds)))
+    while time.monotonic() < deadline:
+        pid = await state.run_in_worker(_read_worker_pid, worker_index)
+        healthy = pid is not None and await state.run_in_worker(_worker_healthy, slot.url)
+        if healthy:
+            with project_sessions._lock:
+                slot.enabled = True
+                slot.error = None
+            return {"worker_index": worker_index, "started": True, "pid": pid}
+        await asyncio.sleep(0.1)
+    with project_sessions._lock:
+        slot.error = "start unconfirmed"
+    raise project_sessions.ProjectSessionError(
+        f"Worker {worker_index} did not become healthy within the timeout"
+    )
+
+
 def _worker_healthy(worker_url: str) -> bool:
     try:
         text, status = transport.do_request(
