@@ -96,6 +96,11 @@ define context DSPCTX
     # Scoped analysis-only direct CE target for statically proved loop ends.
     codec_ce_direct_backedge=(8,8) noflow
     codec_ce_direct_start=(9,24) noflow
+    codec_se_proven_nonnegative=(25,25) noflow
+    # Analysis-only: explicit native proof that a LE branch is taken.
+    codec_le_proven_taken=(26,26) noflow
+    codec_branch_proven_not_taken=(27,27) noflow
+    codec_arch_stack_mode=(28,28) noflow
 ;
 
 define token inst24(24) endian = big
@@ -180,6 +185,12 @@ define token inst24(24) endian = big
     # Type 20 conditional return.
     ret19   = (5,23)
     rettype = (4,4)
+    stack_sts=(0,1)
+    stack_count=(2,2)
+    stack_loop=(3,3)
+    stack_pc=(4,4)
+    stack_irq=(5,6)
+    stack_zero=(7,15)
 
     # Type 29 I/O-space move.
     type29  = (16,23)
@@ -401,6 +412,40 @@ IntSrc: IFC is src_rgp=3 & src_reg=0xc & IFC { export IFC; }
 IntDst: OWRCNTR is dst_rgp=3 & dst_reg=0xd & OWRCNTR { export OWRCNTR; }
 IntSrc: OWRCNTR is src_rgp=3 & src_reg=0xd & OWRCNTR { export OWRCNTR; }
 
+# Length selector follows the chosen I register, never the M register.
+DagL: L0 is g20=0 & dag_i2=0 & L0 { export L0; }
+DagL: L1 is g20=0 & dag_i2=1 & L1 { export L1; }
+DagL: L2 is g20=0 & dag_i2=2 & L2 { export L2; }
+DagL: L3 is g20=0 & dag_i2=3 & L3 { export L3; }
+DagL: L4 is g20=1 & dag_i2=0 & L4 { export L4; }
+DagL: L5 is g20=1 & dag_i2=1 & L5 { export L5; }
+DagL: L6 is g20=1 & dag_i2=2 & L6 { export L6; }
+DagL: L7 is g20=1 & dag_i2=3 & L7 { export L7; }
+ModL: L0 is mod_g=0 & mod_i=0 & L0 { export L0; }
+ModL: L1 is mod_g=0 & mod_i=1 & L1 { export L1; }
+ModL: L2 is mod_g=0 & mod_i=2 & L2 { export L2; }
+ModL: L3 is mod_g=0 & mod_i=3 & L3 { export L3; }
+ModL: L4 is mod_g=1 & mod_i=0 & L4 { export L4; }
+ModL: L5 is mod_g=1 & mod_i=1 & L5 { export L5; }
+ModL: L6 is mod_g=1 & mod_i=2 & L6 { export L6; }
+ModL: L7 is mod_g=1 & mod_i=3 & L7 { export L7; }
+ShiftDagL: L0 is shift_g=0 & dag_i2=0 & L0 { export L0; }
+ShiftDagL: L1 is shift_g=0 & dag_i2=1 & L1 { export L1; }
+ShiftDagL: L2 is shift_g=0 & dag_i2=2 & L2 { export L2; }
+ShiftDagL: L3 is shift_g=0 & dag_i2=3 & L3 { export L3; }
+ShiftDagL: L4 is shift_g=1 & dag_i2=0 & L4 { export L4; }
+ShiftDagL: L5 is shift_g=1 & dag_i2=1 & L5 { export L5; }
+ShiftDagL: L6 is shift_g=1 & dag_i2=2 & L6 { export L6; }
+ShiftDagL: L7 is shift_g=1 & dag_i2=3 & L7 { export L7; }
+PmL: L4 is t1_pmi=0 & L4 { export L4; }
+PmL: L5 is t1_pmi=1 & L5 { export L5; }
+PmL: L6 is t1_pmi=2 & L6 { export L6; }
+PmL: L7 is t1_pmi=3 & L7 { export L7; }
+DmL: L0 is t1_dmi=0 & L0 { export L0; }
+DmL: L1 is t1_dmi=1 & L1 { export L1; }
+DmL: L2 is t1_dmi=2 & L2 { export L2; }
+DmL: L3 is t1_dmi=3 & L3 { export L3; }
+
 # Type-1 dual-fetch destinations and fixed DAGs.
 PDReg: AY0 is t1_pd=0 & AY0 { export AY0; }
 PDReg: AY1 is t1_pd=1 & AY1 { export AY1; }
@@ -554,21 +599,89 @@ ShiftDagM: M6 is shift_g=1 & dag_m2=2 & M6 { export M6; }
 ShiftDagM: M7 is shift_g=1 & dag_m2=3 & M7 { export M7; }
 
 
-DivX: MR2 is xop3=0 & MR2 { export MR2; }
-DivX: AX0 is xop3=1 & AX0 { export AX0; }
-DivX: AX1 is xop3=2 & AX1 { export AX1; }
-DivX: MR1 is xop3=3 & MR1 { export MR1; }
-DivX: AR  is xop3=4 & AR  { export AR; }
-DivX: MR0 is xop3=5 & MR0 { export MR0; }
-DivX: SR1 is xop3=6 & SR1 { export SR1; }
-DivX: SR0 is xop3=7 & SR0 { export SR0; }
-DivY: AY1 is yop2=0 & AY1 { export AY1; }
-DivY: AF  is yop2=1 & AF  { export AF; }
-DivY: SR1 is yop2=2 & SR1 { export SR1; }
-DivY: SR0 is yop2=3 & SR0 { export SR0; }
+# ADSP-218x Instruction Set Reference rev.2: A-6 and ALU operand table.
+# Independently reproduced native 061000=DIVS AF,AX0 and 071000=DIVQ AX0.
+# The former table incorrectly shifted X selections and allowed non-Y registers.
+DivX: AX0 is xop3=0 & AX0 { export AX0; }
+DivX: AX1 is xop3=1 & AX1 { export AX1; }
+DivX: AR  is xop3=2 & AR  { export AR; }
+DivX: MR0 is xop3=3 & MR0 { export MR0; }
+DivX: MR1 is xop3=4 & MR1 { export MR1; }
+DivX: MR2 is xop3=5 & MR2 { export MR2; }
+DivX: SR0 is xop3=6 & SR0 { export SR0; }
+DivX: SR1 is xop3=7 & SR1 { export SR1; }
+DivY: AY1 is yop2=1 & AY1 { export AY1; }
+DivY: AF  is yop2=2 & AF  { export AF; }
 
 JumpAddr: addr14 is addr14 { export *[PM]:2 addr14; }
 LoopAddr: loop14 is loop14 { export *[PM]:2 loop14; }
+
+# ADSP-218x Hardware Reference 4-8: BIT_REV reverses the fourteen
+# DAG1 address output lines, NOT the index register or its post-update.
+# This branch-free network avoids manufacturing a conditional CFG edge.
+# Target acceptance remains separate; linear/circular I updates are unchanged.
+macro dag1_dm_address(index, effective) {
+    local br_pair:2 = ((index & 0x5555) << 1) | ((index >> 1) & 0x5555);
+    local br_quad:2 = ((br_pair & 0x3333) << 2) | ((br_pair >> 2) & 0x3333);
+    local br_octet:2 = ((br_quad & 0x0f0f) << 4) | ((br_quad >> 4) & 0x0f0f);
+    local br_word:2 = (br_octet << 8) | (br_octet >> 8);
+    local br_address:2 = br_word >> 2;
+    local br_mask:2 = 0 - ((MSTAT >> 1) & 1);
+    effective = (index & ~br_mask) | (br_address & br_mask);
+}
+
+# Compile-time DAG selection: DAG2 has no dependency on BIT_REV.
+# Export fresh address values; memory access must never change I0..I7.
+DagDmAddress: is g20=0 & DagI {
+    local effective:2;
+    dag1_dm_address(DagI, effective);
+    export effective;
+}
+DagDmAddress: is g20=1 & DagI { export DagI; }
+
+DualDmAddress: is DmI {
+    local effective:2;
+    dag1_dm_address(DmI, effective);
+    export effective;
+}
+
+ShiftDmAddress: is shift_g=0 & ShiftDagI {
+    local effective:2;
+    dag1_dm_address(ShiftDagI, effective);
+    export effective;
+}
+ShiftDmAddress: is shift_g=1 & ShiftDagI { export ShiftDagI; }
+
+
+# ADSP-218x Chapter 4: I/M/L are 14-bit, M signed, L zero selects linear.
+# Base B is the current valid I rounded down to a multiple of ceilpow2(L).
+# Circular mode requires I in [B, B+L) and |M|<L (processor specification).
+# This P-code implements one valid wrap per update without branching.
+macro dsp_dag_postmodify(target, oldindex, delta, length) {
+    local index14:2 = oldindex & 0x3fff;
+    local mod14:2 = delta & 0x3fff;
+    local signed14:2 = (mod14 << 2) s>> 2;
+    local i32:4 = zext(index14);
+    local m32:4 = sext(signed14);
+    local l32:4 = zext(length & 0x3fff);
+    local rounded:4 = l32 - 1;
+    rounded = rounded | (rounded >> 1);
+    rounded = rounded | (rounded >> 2);
+    rounded = rounded | (rounded >> 4);
+    rounded = rounded | (rounded >> 8);
+    local base:4 = i32 & ~rounded;
+    local candidate:4 = i32 + m32;
+    local enabled:4 = 0 - zext(l32 != 0);
+    local lower:4 = 0 - zext(candidate s< base);
+    local upper:4 = 0 - zext(candidate s>= (base + l32));
+    local adjusted:4 = candidate + (l32 & lower & enabled) - (l32 & upper & enabled);
+    # Preserve the pre-existing full 16-bit register update with L==0.
+    # Only enabled circular mode confines the physical address to 14 bits.
+    local mode:2 = 0 - zext(length != 0);
+    local linear:2 = oldindex + delta;
+    local circular:2 = adjusted:2 & 0x3fff;
+    target = (linear & ~mode) | (circular & mode);
+}
 
 macro alu_flags_add(a, b, r) {
     AZF = (r == 0);
@@ -589,6 +702,9 @@ macro alu_flags_logic(r) {
 }
 
 # -----------------------------------------------------------------------------
+define pcodeop dsp_resident_tailcall;
+@include "sunplus_stack_runtime.sinc"
+
 # Counted nested CE loops need two separate stacks:
 #   - a CNTR write saves the active outer loop's remaining count;
 #   - a DO saves its return loop start, not the counter itself.
@@ -651,7 +767,7 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 # runtime DSP_LOOP_START is held on silicon, but the decompiler need not
 # infer its value across a callee whose ABI cannot establish preservation.
 # This path is opt-in for individually verified DO/end instruction pairs.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_direct_done>;
@@ -660,8 +776,46 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
     DSP_LOOP_START = DSP_LOOP_START_SHADOW;
     CNTR = DSP_LOOP_COUNT_SHADOW;
 }
+# Opt-in deterministic outer backedge for hardware-nested codec loops.
+# Unlike the nonnested direct CE constructor, the nested outer end must NOT
+# restore CNTR from DSP_LOOP_COUNT_SHADOW: the inner CNTR load saves the outer
+# counter in DSP_STATIC_CNTR_OUTER and the inner-end restores it already.
+# The outer DO constructor stores its start separately; the direct target is
+# a statically verified DO fallthrough, never a guessed dynamic address.
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <codec_ce_nested_outer_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_outer_done>
+}
+# EXPERIMENT: opt-in STATIC INNER (depth=2) CE direct backedge.
+# Requires the proven CNTR-save constructor at native depth-2 counter writers.
+# The inner CE must restore the saved outer count only on exit.
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <codec_ce_nested_inner_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_inner_direct_done>
+    CNTR = DSP_STATIC_CNTR_OUTER;
+}
+# Full software sequencer execution, without per-site CE or loop-depth hints.
+:^instruction is codec_arch_stack_mode=1 & codec_ce_phase=0 & instruction [ codec_ce_phase=1; ] {
+    DSP_PC_POP_ACTIVE=DSP_PC_POP_PENDING;
+    DSP_PC_POP_PENDING=0;
+    arch_sstat();
+    build instruction;
+    arch_complete_pending_pc();
+    arch_end_instruction(inst_start / 3);
+    local next_word:2=inst_next / 3;
+    if (next_word < 0x4000) goto <no_pc_wrap>;
+    goto [0:2];
+<no_pc_wrap>
+}
+
 # Keep the proven lightweight single-loop C recovery as the default.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <simple_done>;
@@ -671,14 +825,14 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
     CNTR = DSP_LOOP_COUNT_SHADOW;
 }
 # EXPERIMENT: deterministic two-level CE endpoints for CFG recovery.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_outer_done>;
     goto [DSP_STATIC_START_OUTER];
 <static_outer_done>
 }
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_inner_done>;
@@ -687,7 +841,7 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
     CNTR = DSP_STATIC_CNTR_OUTER;
 }
 # Expanded stack handling is selected only for proven nested DO regions.
-:^instruction is codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_done>;
@@ -715,7 +869,7 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 <ce_count3> CNTR = DSP_COUNT3; DSP_COUNT_DEPTH = 3;
 <ce_finish>
 }
-:^instruction is codec_ce_phase=0 & instruction [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & instruction [ codec_ce_phase=1; ] {
     build instruction;
 }
 with : codec_ce_phase=1 {
@@ -724,29 +878,29 @@ with : codec_ce_phase=1 {
 # Type-1 reads are parallel/read-first; PM low 8 bits are captured in PX.
 # -----------------------------------------------------------------------------
 
-:PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=0 & PDReg & DDReg & PmI & PmM & DmI & DmM
+:"" PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=0 & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
     local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM;
-    local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
-    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm;
+    local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
+    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL);
 }
-:"MR =" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=4 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM
+:"MR =" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=4 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
-    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
+    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
     local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y;
-    MR0=prod:2; MR1=prod[16,16]; MR2=0; if (prod s>=0) goto <t1ss_sign_done>; MR2=0xffff; <t1ss_sign_done>
-    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm; MVF=0;
+    MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2;
+    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL); MVF=0;
 }
-:AR "=" ALUX "-" ALUY "," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=23 & ALUX & ALUY & PDReg & DDReg & PmI & PmM & DmI & DmM
+:AR "=" ALUX "-" ALUY "," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=23 & ALUX & ALUY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
-    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
+    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
     local x:2=ALUX; local y:2=ALUY; AR=x-y; alu_flags_sub(x,y,AR);
-    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm;
+    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL);
 }
 
-:"DM(" DagI "," DagM ")" "=" t2_data is type3=5 & DagI & DagM & t2_data
+:"DM(" DagI "," DagM ")" "=" t2_data is type3=5 & DagI & DagM & t2_data & DagDmAddress & DagL
 {
-    local a:2=DagI; *[DM]:2 a=t2_data; DagI=DagI+DagM;
+    local a:2=DagI; *[DM]:2 DagDmAddress=t2_data; dsp_dag_postmodify(DagI, DagI, DagM, DagL);
 }
 
 # -----------------------------------------------------------------------------
@@ -754,23 +908,23 @@ with : codec_ce_phase=1 {
 # PMD23..8 in DREG and PMD7..0 in PX; writes combine DREG<<8 with PX[7:0].
 # -----------------------------------------------------------------------------
 
-:"" DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=0 & yop2=0 & xop3=0 & DReg4 & DagI & DagM
+:"" DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=0 & yop2=0 & xop3=0 & DReg4 & DagI & DagM & DagL
 {
     local a:2 = DagI;
     local word:3 = dsp_pm_load24(a);
     DReg4 = word[8,16];
     PX = zext(word[0,8]);
-    DagI = DagI + DagM;
+    dsp_dag_postmodify(DagI, DagI, DagM, DagL);
 }
 
-:"PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=0 & yop2=0 & xop3=0 & DReg4 & DagI & DagM
+:"PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=0 & yop2=0 & xop3=0 & DReg4 & DagI & DagM & DagL
 {
     local a:2 = DagI;
     local hi:3 = zext(DReg4) << 8;
     local lo:3 = zext(PX) & 0xff;
     local word:3 = hi | lo;
     dsp_pm_store24(a,word);
-    DagI = DagI + DagM;
+    dsp_dag_postmodify(DagI, DagI, DagM, DagL);
 }
 
 # -----------------------------------------------------------------------------
@@ -780,7 +934,7 @@ with : codec_ce_phase=1 {
 # Explicit codec counter loads also model the counter-stack push on write.
 # The srvdsp wrapper retains its existing isolated language semantics.
 # EXPERIMENT: inner-loop counter saves the statically known outer counter.
-:DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
 {
     local addr:2=addr14;
     local newval:2=*[DM]:2 addr;
@@ -788,7 +942,7 @@ with : codec_ce_phase=1 {
     CNTR = newval;
 }
 
-:DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
 {
     local dmaddr:2 = addr14;
     local incoming:2 = *[DM]:2 dmaddr;
@@ -814,13 +968,13 @@ with : codec_ce_phase=1 {
 
 # LDI CNTR is the other corpus-proven counter-stack push instruction.
 # EXPERIMENT: inner-loop immediate counter with one static saved frame.
-:LDI CNTR, data14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
+:LDI CNTR, data14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
 {
     DSP_STATIC_CNTR_OUTER = CNTR;
     CNTR = data14;
 }
 
-:LDI CNTR, data14 is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
+:LDI CNTR, data14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
 {
     codec_cntr_load(data14:2);
 }
@@ -838,56 +992,56 @@ with : codec_ce_phase=1 {
 # the real CNTR-controlled back edge to the behavior engine.
 # -----------------------------------------------------------------------------
 
-:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=1 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
+:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=1 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4 & DagDmAddress & DagL
 {
     local dmaddr:2 = DagI;
-    *[DM]:2 dmaddr = DReg4;
-    DagI = DagI + DagM;
+    *[DM]:2 DagDmAddress = DReg4;
+    dsp_dag_postmodify(DagI, DagI, DagM, DagL);
     CNTR = CNTR - 1;
     if (CNTR != 0) goto inst_start;
 }
 
-:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=0 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4
+:DMWRITE DagI, DagM, DReg4 is srvdsp_ce_loop_end=0 & type3=3 & d19=1 & amf5=0 & DagI & DagM & DReg4 & DagDmAddress & DagL
 {
     local dmaddr:2 = DagI;
-    *[DM]:2 dmaddr = DReg4;
-    DagI = DagI + DagM;
+    *[DM]:2 DagDmAddress = DReg4;
+    dsp_dag_postmodify(DagI, DagI, DagM, DagL);
 }
 
-:DMREAD DReg4, DagI, DagM is type3=3 & d19=0 & amf5=0 & DagI & DagM & DReg4
+:DMREAD DReg4, DagI, DagM is type3=3 & d19=0 & amf5=0 & DagI & DagM & DReg4 & DagDmAddress & DagL
 {
     local dmaddr:2 = DagI;
-    DReg4 = *[DM]:2 dmaddr;
-    DagI = DagI + DagM;
+    DReg4 = *[DM]:2 DagDmAddress;
+    dsp_dag_postmodify(DagI, DagI, DagM, DagL);
 }
 
 # Corpus-proven Type-4 ALU + DM-read multifunction forms.  All source values
 # are sampled before result/register/pointer writes, matching parallel DSP
 # semantics.
-:AR "=" ALUX "+" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
+:AR "=" ALUX "+" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
     local x:2 = ALUX;
     local y:2 = ALUY;
     local a:2 = DagI;
     local m:2 = DagM;
-    local fetched:2 = *[DM]:2 a;
+    local fetched:2 = *[DM]:2 DagDmAddress;
     local r:2 = x + y;
     AR = r;
     DReg4 = fetched;
-    DagI = a + m;
+    dsp_dag_postmodify(DagI, a, m, DagL);
     alu_flags_add(x, y, r);
 }
 
-:AR "=" ALUY "- 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=24 & ALUY & DReg4 & DagI & DagM
+:AR "=" ALUY "- 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=24 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
     local y:2 = ALUY;
     local a:2 = DagI;
     local m:2 = DagM;
-    local fetched:2 = *[DM]:2 a;
+    local fetched:2 = *[DM]:2 DagDmAddress;
     local r:2 = y - 1;
     AR = r;
     DReg4 = fetched;
-    DagI = a + m;
+    dsp_dag_postmodify(DagI, a, m, DagL);
     alu_flags_sub(y, 1:2, r);
 }
 
@@ -1162,13 +1316,23 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 }
 
 
-:"IF LT" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=4
+:"IF LT" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     local x:2 = ALUX;
     local y:2 = ALUY;
     AR = x + y;
     alu_flags_add(x, y, AR);
+}
+:"IF LT" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=4
+{
+    if (ANF == AVF) goto <arch_condition_skipped>;
+    local x:2 = ALUX;
+    local y:2 = ALUY;
+    AR = x + y;
+    alu_flags_add(x, y, AR);
+
+<arch_condition_skipped>
 }
 
 # Codec-profile Type-9 ALU forms.
@@ -1195,12 +1359,24 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { local y:2 = ALUY; local x:2 = ALUX; AR = y - x; alu_flags_sub(y, x, AR); }
 :AR "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=15
 { AR = ALUY; alu_flags_logic(AR); }
-:"IF EQ" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=0
+:"IF EQ" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=0
 { if (AZF == 0) goto inst_next; AR = ALUY; alu_flags_logic(AR); }
-:"IF GE" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=5
+:"IF EQ" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=0
+{ if (AZF == 0) goto <arch_condition_skipped>; AR = ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF GE" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=5
 { if (ANF != AVF) goto inst_next; AR = ALUY; alu_flags_logic(AR); }
-:"IF GE" "AR" "=" ALUX "-" ALUY is type9=4 & z18=0 & amf5=23 & ALUX & ALUY & mid4=0 & cond4=5
+:"IF GE" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=5
+{ if (ANF != AVF) goto <arch_condition_skipped>; AR = ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF GE" "AR" "=" ALUX "-" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=23 & ALUX & ALUY & mid4=0 & cond4=5
 { if (ANF != AVF) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x-y; alu_flags_sub(x,y,AR); }
+:"IF GE" "AR" "=" ALUX "-" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=23 & ALUX & ALUY & mid4=0 & cond4=5
+{ if (ANF != AVF) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x-y; alu_flags_sub(x,y,AR);
+<arch_condition_skipped>
+}
 
 # -----------------------------------------------------------------------------
 # Reachable codec-profile expansion (ADSP-218x reference forms).
@@ -1209,34 +1385,101 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 # -----------------------------------------------------------------------------
 
 # Conditional Type-9 ALU forms.
-:"IF EQ" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=0
+:"IF EQ" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=0
 { if (AZF == 0) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR); }
-:"IF NE" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=1
+:"IF EQ" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=0
+{ if (AZF == 0) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=1
 { if (AZF != 0) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR); }
-:"IF LE" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=3
+:"IF NE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=1
+{ if (AZF != 0) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
+<arch_condition_skipped>
+}
+:"IF LE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=3
 { local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR); }
-:"IF GE" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=5
+:"IF LE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=3
+{ local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
+<arch_condition_skipped>
+}
+:"IF GE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=5
 { if (ANF != AVF) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR); }
-:"IF NE" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=1
+:"IF GE" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=5
+{ if (ANF != AVF) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=1
 { if (AZF != 0) goto inst_next; AR=ALUY; alu_flags_logic(AR); }
-:"IF LE" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=3
+:"IF NE" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=1
+{ if (AZF != 0) goto <arch_condition_skipped>; AR=ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF LE" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=3
 { local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto inst_next; AR=ALUY; alu_flags_logic(AR); }
-:"IF LT" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=4
+:"IF LE" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=3
+{ local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto <arch_condition_skipped>; AR=ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+# Non-CE predicated register move: preserve the existing CE-end fallback until
+# its conditional execution/loop-update interaction has separate proof.
+:"IF LT" "AR" "=" ALUY is codec_ce_loop_end=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=4
+{
+    # Capture the old condition before selecting every affected destination.
+    # A false predicate preserves complete flag bytes, not only bit zero.
+    local take:1 = (ANF != AVF);
+    local flagmask:1 = -take;
+    local wordmask:2 = -zext(take);
+    local y:2 = ALUY;
+    AR = (AR & ~wordmask) | (y & wordmask);
+    AZF = (AZF & ~flagmask) | ((y == 0) & flagmask);
+    ANF = (ANF & ~flagmask) | ((y s< 0) & flagmask);
+    AVF = AVF & ~flagmask;
+}
+:"IF LT" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=4
 { if (ANF == AVF) goto inst_next; AR=ALUY; alu_flags_logic(AR); }
-:"IF EQ" "AR" "=" ALUY "+ 1" is type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=0
+:"IF LT" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=4
+{ if (ANF == AVF) goto <arch_condition_skipped>; AR=ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF EQ" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=0
 { if (AZF == 0) goto inst_next; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR); }
+:"IF EQ" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=0
+{ if (AZF == 0) goto <arch_condition_skipped>; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR);
+<arch_condition_skipped>
+}
 
 # Conditional constant forms reached by codec profiles.
-:"IF EQ" "AR" "=" AluConst is type9=4 & z18=0 & amf5=16 & AluConst & cond4=0
+:"IF EQ" "AR" "=" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=0
 { if (AZF == 0) goto inst_next; AR=AluConst; alu_flags_logic(AR); }
-:"IF GE" "AR" "=" AluConst is type9=4 & z18=0 & amf5=16 & AluConst & cond4=5
+:"IF EQ" "AR" "=" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=0
+{ if (AZF == 0) goto <arch_condition_skipped>; AR=AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF GE" "AR" "=" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=5
 { if (ANF != AVF) goto inst_next; AR=AluConst; alu_flags_logic(AR); }
-:"IF LE" "AR" "=" AluConst "+ 1" is type9=4 & z18=0 & amf5=17 & AluConst & cond4=3
+:"IF GE" "AR" "=" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=5
+{ if (ANF != AVF) goto <arch_condition_skipped>; AR=AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF LE" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=3
 { local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto inst_next; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR); }
-:"IF GE" "AR" "=" AluConst "- 1" is type9=4 & z18=0 & amf5=24 & AluConst & cond4=5
+:"IF LE" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=3
+{ local take:1=(AZF!=0)||(ANF!=AVF); if (take==0) goto <arch_condition_skipped>; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF GE" "AR" "=" AluConst "- 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=24 & AluConst & cond4=5
 { if (ANF != AVF) goto inst_next; local c:2=AluConst; AR=c-1; alu_flags_sub(c,1:2,AR); }
-:"IF NE" "AR" "=" ALUX "+" AluConst is type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=1
+:"IF GE" "AR" "=" AluConst "- 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=24 & AluConst & cond4=5
+{ if (ANF != AVF) goto <arch_condition_skipped>; local c:2=AluConst; AR=c-1; alu_flags_sub(c,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUX "+" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=1
 { if (AZF != 0) goto inst_next; local x:2=ALUX; local c:2=AluConst; AR=x+c; alu_flags_add(x,c,AR); }
+:"IF NE" "AR" "=" ALUX "+" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=1
+{ if (AZF != 0) goto <arch_condition_skipped>; local x:2=ALUX; local c:2=AluConst; AR=x+c; alu_flags_add(x,c,AR);
+<arch_condition_skipped>
+}
 
 # Additional unconditional Type-9 ALU/MAC forms.
 :AF "=" ALUY is type9=4 & z18=1 & amf5=16 & ALUY & mid4=0 & cond4=15
@@ -1278,7 +1521,7 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 :"MR =" MACX "*" MACY "(SS)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DReg
 {
     local moved:2=DReg; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y;
-    MR0=prod:2; MR1=prod[16,16]; MR2=0; if (prod s>=0) goto <t8ss_sign_done>; MR2=0xffff; <t8ss_sign_done> DReg4=moved; MVF=0;
+    MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; DReg4=moved; MVF=0;
 }
 :"MR =" MACX "*" MACY "(UU)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=7 & MACX & MACY & DReg4 & DReg
 {
@@ -1288,63 +1531,71 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 :"MR =" MACX "*" MACY "(RND)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DReg
 { local moved:2=DReg; dsp_mac_round_xy(MACX,MACY); DReg4=moved; }
 
-# Type 4 computation + DM read. Only D=0 forms are currently reachable.
-:"MR =" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; dsp_mac_round_xy(MACX,MACY); DReg4=v; DagI=a+m; }
-:"MR =" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM
+# Exact zero product, parallel DM read: the native signed product MX0*0 cannot be negative.
+:"MR = MX0 * 0 (SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=4 & xop3=0 & yop2=3 & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
-    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y;
-    MR0=prod:2; MR1=prod[16,16]; MR2=0; if (prod s>=0) goto <t4ss_sign_done>; MR2=0xffff; <t4ss_sign_done> DReg4=v; DagI=a+m; MVF=0;
+    local a:2=DagI; local m:2=DagM; local fetched:2=*[DM]:2 DagDmAddress;
+    MR0=0; MR1=0; MR2=0;
+    DReg4=fetched; dsp_dag_postmodify(DagI, a, m, DagL); MVF=0;
 }
-:AF "=" ALUY "+ 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=17 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local y:2=ALUY; AF=y+1; DReg4=v; DagI=a+m; alu_flags_add(y,1:2,AF); }
-:AR "=" "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=21 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local y:2=ALUY; AR=-y; DReg4=v; DagI=a+m; alu_flags_sub(0:2,y,AR); }
-:AR "=" ALUX "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:2=ALUX; local y:2=ALUY; AR=x-y; DReg4=v; DagI=a+m; alu_flags_sub(x,y,AR); }
-:AR "=" ALUX "AND" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=28 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; AR=ALUX&ALUY; DReg4=v; DagI=a+m; alu_flags_logic(AR); }
 
-
-:AR "=" "ABS" ALUX "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=31 & ALUX & DReg4 & DagI & DagM
+# Type 4 computation + DM read. Only D=0 forms are currently reachable.
+:"MR =" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; dsp_mac_round_xy(MACX,MACY); DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR =" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
-    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:2=ALUX;
+    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y;
+    MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); MVF=0;
+}
+:AF "=" ALUY "+ 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=17 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local y:2=ALUY; AF=y+1; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(y,1:2,AF); }
+:AR "=" "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=21 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local y:2=ALUY; AR=-y; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(0:2,y,AR); }
+:AR "=" ALUX "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:2=ALUX; local y:2=ALUY; AR=x-y; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AR); }
+:AR "=" ALUX "AND" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=28 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; AR=ALUX&ALUY; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_logic(AR); }
+
+
+:AR "=" "ABS" ALUX "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=31 & ALUX & DReg4 & DagI & DagM & DagDmAddress & DagL
+{
+    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:2=ALUX;
     if(x s>=0) goto <final_t4abs_pos>; AR=-x; goto <final_t4abs_done>;
 <final_t4abs_pos> AR=x;
-<final_t4abs_done> DReg4=v; DagI=a+m; AZF=(AR==0); ANF=(AR s<0); AVF=(x==0x8000); ASF=(x s<0);
+<final_t4abs_done> DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); AZF=(AR==0); ANF=(AR s<0); AVF=(x==0x8000); ASF=(x s<0);
 }
-:AR "=" ALUY "+ 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=17 & ALUY & DReg4 & DagI & DagM
+:AR "=" ALUY "+ 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=17 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
-    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local y:2=ALUY; AR=y+1; DReg4=v; DagI=a+m; alu_flags_add(y,1:2,AR);
+    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local y:2=ALUY; AR=y+1; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(y,1:2,AR);
 }
 
 
-:AR "=" ALUY "-" ALUX "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM
+:AR "=" ALUY "-" ALUX "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
     local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local y:2=ALUY; local x:2=ALUX;
-    AR=y-x; *[DM]:2 a=stored; DagI=a+m; alu_flags_sub(y,x,AR);
+    AR=y-x; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(y,x,AR);
 }
 
 # Type 5 computation + PM read. PMD low 8 bits flow through PX implicitly.
-:"MR =" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM
+:"MR =" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM & DagL
 {
-    local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; dsp_mac_round_xy(MACX,MACY);
-    DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m;
+    local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); dsp_mac_round_xy(MACX,MACY);
+    DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL);
 }
-:AR "=" "ABS" ALUX "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=31 & ALUX & DReg4 & DagI & DagM
+:AR "=" "ABS" ALUX "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=31 & ALUX & DReg4 & DagI & DagM & DagL
 {
-    local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:2=ALUX;
+    local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:2=ALUX;
     if (x s>= 0) goto <t5_abs_pos>; AR=-x; goto <t5_abs_done>;
 <t5_abs_pos> AR=x;
-<t5_abs_done> DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; AZF=(AR==0); ANF=(AR s<0); AVF=(x==0x8000); ASF=(x s<0);
+<t5_abs_done> DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); AZF=(AR==0); ANF=(AR s<0); AVF=(x==0x8000); ASF=(x s<0);
 }
 
 
 
-:AR "=" ALUX "-" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
+:AR "=" ALUX "-" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
 {
-    local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:2=ALUX; local y:2=ALUY;
-    AR=x-y; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; alu_flags_sub(x,y,AR);
+    local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:2=ALUX; local y:2=ALUY;
+    AR=x-y; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AR);
 }
 
 # -----------------------------------------------------------------------------
@@ -1355,67 +1606,67 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 # -----------------------------------------------------------------------------
 
 # Type 1: ALU/MAC plus simultaneous PM/DM reads.
-:"MR = MR +" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=8 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM
+:"MR = MR +" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=8 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
     local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM;
-    local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
+    local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
     local sx:8=sext(MACX); local sy:8=sext(MACY); local prod:8=sx*sy;
     local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod;
-    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm;
+    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL);
 }
-:"MR = MR -" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=12 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM
+:"MR = MR -" MACX "*" MACY "(SS)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=12 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
     local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM;
-    local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
+    local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
     local sx:8=sext(MACX); local sy:8=sext(MACY); local prod:8=sx*sy;
     local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur-prod;
-    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm;
+    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL);
 }
-:AR "=" ALUX "+" ALUY "," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=19 & ALUX & ALUY & PDReg & DDReg & PmI & PmM & DmI & DmM
+:AR "=" ALUX "+" ALUY "," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=19 & ALUX & ALUY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
 {
-    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da;
+    local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress;
     local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
-    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm;
+    PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL);
 }
 
 # Type 4: ALU/MAC with DM read/write.
-:"MR = MR +" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM
+:"MR = MR +" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
 {
-    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local sx:8=sext(MACX); local sy:8=sext(MACY); local prod:8=sx*sy;
+    local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local sx:8=sext(MACX); local sy:8=sext(MACY); local prod:8=sx*sy;
     local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod;
-    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=v; DagI=a+m;
+    MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL);
 }
-:AF "=" ALUX "+" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:2=ALUX; local y:2=ALUY; AF=x+y; DReg4=v; DagI=a+m; alu_flags_add(x,y,AF); }
-:AR "=" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; AR=ALUY; DReg4=v; DagI=a+m; alu_flags_logic(AR); }
-:AR "=" ALUY "-" ALUX "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local y:2=ALUY; local x:2=ALUX; AR=y-x; DReg4=v; DagI=a+m; alu_flags_sub(y,x,AR); }
-:AF "=" ALUY "- 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=24 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local y:2=ALUY; AF=y-1; DReg4=v; DagI=a+m; alu_flags_sub(y,1:2,AF); }
-:AR "=" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local y:2=ALUY; AR=y; *[DM]:2 a=stored; DagI=a+m; alu_flags_logic(AR); }
+:AF "=" ALUX "+" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:2=ALUX; local y:2=ALUY; AF=x+y; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AF); }
+:AR "=" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; AR=ALUY; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_logic(AR); }
+:AR "=" ALUY "-" ALUX "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local y:2=ALUY; local x:2=ALUX; AR=y-x; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(y,x,AR); }
+:AF "=" ALUY "- 1," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=24 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local y:2=ALUY; AF=y-1; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(y,1:2,AF); }
+:AR "=" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local y:2=ALUY; AR=y; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_logic(AR); }
 
-:AR "=" ALUX "+" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x+y; *[DM]:2 a=stored; DagI=a+m; alu_flags_add(x,y,AR); }
-:"MR =" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_round_xy(MACX,MACY); *[DM]:2 a=stored; DagI=a+m; }
+:AR "=" ALUX "+" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x+y; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AR); }
+:"MR =" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_round_xy(MACX,MACY); *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); }
 
 # Type 5: ALU/MAC with PM read.
-:"MR = MR +" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; dsp_mac_acc_round_xy(MACX,MACY); DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; }
-:"MR =" MACX "*" MACY "(SS)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <t5ss_d>; MR2=0xffff; <t5ss_d> DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; MVF=0; }
-:"MR =" MACX "*" MACY "(UU)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=7 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:4=zext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; MVF=0; }
-:"MR = MR +" MACX "*" MACY "(SS)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; }
-:AR "=" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; AR=ALUY; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; alu_flags_logic(AR); }
-:AR "=" ALUX "+" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:2=ALUX; local y:2=ALUY; AR=x+y; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; alu_flags_add(x,y,AR); }
-:AF "=" ALUX "+" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local x:2=ALUX; local y:2=ALUY; AF=x+y; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; alu_flags_add(x,y,AF); }
+:"MR = MR +" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); dsp_mac_acc_round_xy(MACX,MACY); DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR =" MACX "*" MACY "(SS)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); MVF=0; }
+:"MR =" MACX "*" MACY "(UU)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=7 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:4=zext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); MVF=0; }
+:"MR = MR +" MACX "*" MACY "(SS)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); }
+:AR "=" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=16 & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); AR=ALUY; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_logic(AR); }
+:AR "=" ALUX "+" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:2=ALUX; local y:2=ALUY; AR=x+y; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AR); }
+:AF "=" ALUX "+" ALUY "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local x:2=ALUX; local y:2=ALUY; AF=x+y; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AF); }
 
 # Type 8: ALU/MAC plus data-register move.
 :"MR = MR +" MACX "*" MACY "(RND)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DReg
@@ -1449,7 +1700,7 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 :"MR =" MACX "*" MACX2 "(SS)" is type9=4 & z18=0 & amf5=4 & yop2=0 & MACX & MACX2 & mid4=1 & cond4=15
 {
     local x:4=sext(MACX); local x2:4=sext(MACX2); local prod:4=x*x2;
-    MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <final_square_ss_done>; MR2=0xffff; <final_square_ss_done> MVF=0;
+    MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; MVF=0;
 }
 
 :"MR = MR -" MACX "*" MACX2 "(SS)" is type9=4 & z18=0 & amf5=12 & yop2=0 & MACX & MACX2 & mid4=1 & cond4=15
@@ -1471,15 +1722,21 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 {
     local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MF=prod[16,16]; MVF=0;
 }
-:"IF EQ" "AR" "=" ALUY "-" ALUX is type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=0
+:"IF EQ" "AR" "=" ALUY "-" ALUX is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=0
 {
     if(AZF==0) goto inst_next; local y:2=ALUY; local x:2=ALUX; AR=y-x; alu_flags_sub(y,x,AR);
+}
+:"IF EQ" "AR" "=" ALUY "-" ALUX is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=0
+{
+    if(AZF==0) goto <arch_condition_skipped>; local y:2=ALUY; local x:2=ALUX; AR=y-x; alu_flags_sub(y,x,AR);
+
+<arch_condition_skipped>
 }
 
 :"MR = MR +" MACX "*" MACY "(RND)" is type9=4 & z18=0 & amf5=2 & MACX & MACY & mid4=0 & cond4=15
 { dsp_mac_acc_round_xy(MACX,MACY); }
 :"MR =" MACX "*" MACY "(SU)" is type9=4 & z18=0 & amf5=5 & MACX & MACY & mid4=0 & cond4=15
-{ local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <t9su_d>; MR2=0xffff; <t9su_d> MVF=0; }
+{ local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; MVF=0; }
 :"MR = MR +" MACX "*" MACY "(UU)" is type9=4 & z18=0 & amf5=11 & MACX & MACY & mid4=0 & cond4=15
 { local x:8=zext(MACX); local y:8=zext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; }
 :MF "=" MACX "*" MACY "(SS)" is type9=4 & z18=1 & amf5=4 & MACX & MACY & mid4=0 & cond4=15
@@ -1499,34 +1756,78 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { AR=ALUX^AluConst; alu_flags_logic(AR); }
 
 # Type 9 conditional forms reached after deeper flow expansion.
-:"IF NE" "AR" "=" AluConst is type9=4 & z18=0 & amf5=16 & AluConst & cond4=1
+:"IF NE" "AR" "=" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=1
 { if(AZF!=0) goto inst_next; AR=AluConst; alu_flags_logic(AR); }
-:"IF GT" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=2
+:"IF NE" "AR" "=" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & AluConst & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; AR=AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF GT" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=2
 { if(AZF!=0) goto inst_next; if(ANF!=AVF) goto inst_next; AR=ALUY; alu_flags_logic(AR); }
-:"IF NE" "AR" "=" ALUY "+ 1" is type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=1
+:"IF GT" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=2
+{ if(AZF!=0) goto <arch_condition_skipped>; if(ANF!=AVF) goto <arch_condition_skipped>; AR=ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=1
 { if(AZF!=0) goto inst_next; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR); }
-:"IF GT" "AR" "=" ALUY "+ 1" is type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=2
+:"IF NE" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF GT" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=2
 { if(AZF!=0) goto inst_next; if(ANF!=AVF) goto inst_next; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR); }
-:"IF LT" "AR" "=" ALUY "+ 1" is type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=4
+:"IF GT" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=2
+{ if(AZF!=0) goto <arch_condition_skipped>; if(ANF!=AVF) goto <arch_condition_skipped>; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF LT" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=4
 { if(ANF==AVF) goto inst_next; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR); }
-:"IF NE" "AR" "=" AluConst "+ 1" is type9=4 & z18=0 & amf5=17 & AluConst & cond4=1
+:"IF LT" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=4
+{ if(ANF==AVF) goto <arch_condition_skipped>; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=1
 { if(AZF!=0) goto inst_next; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR); }
-:"IF GT" "AR" "=" AluConst "+ 1" is type9=4 & z18=0 & amf5=17 & AluConst & cond4=2
+:"IF NE" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF GT" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=2
 { if(AZF!=0) goto inst_next; if(ANF!=AVF) goto inst_next; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR); }
-:"IF GT" "AR" "=" AluConst "- 1" is type9=4 & z18=0 & amf5=24 & AluConst & cond4=2
+:"IF GT" "AR" "=" AluConst "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & AluConst & cond4=2
+{ if(AZF!=0) goto <arch_condition_skipped>; if(ANF!=AVF) goto <arch_condition_skipped>; local c:2=AluConst; AR=c+1; alu_flags_add(c,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF GT" "AR" "=" AluConst "- 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=24 & AluConst & cond4=2
 { if(AZF!=0) goto inst_next; if(ANF!=AVF) goto inst_next; local c:2=AluConst; AR=c-1; alu_flags_sub(c,1:2,AR); }
-:"IF GT" "AR" "=" ALUX "+" ALUY is type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=2
+:"IF GT" "AR" "=" AluConst "- 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=24 & AluConst & cond4=2
+{ if(AZF!=0) goto <arch_condition_skipped>; if(ANF!=AVF) goto <arch_condition_skipped>; local c:2=AluConst; AR=c-1; alu_flags_sub(c,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF GT" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=2
 { if(AZF!=0) goto inst_next; if(ANF!=AVF) goto inst_next; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR); }
-:"IF NE" "AR" "=" ALUX "AND" AluConst is type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=1
+:"IF GT" "AR" "=" ALUX "+" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & ALUY & mid4=0 & cond4=2
+{ if(AZF!=0) goto <arch_condition_skipped>; if(ANF!=AVF) goto <arch_condition_skipped>; local x:2=ALUX; local y:2=ALUY; AR=x+y; alu_flags_add(x,y,AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUX "AND" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=1
 { if(AZF!=0) goto inst_next; AR=ALUX&AluConst; alu_flags_logic(AR); }
-:"IF NE" "AR" "=" ALUX "OR" AluConst is type9=4 & z18=0 & amf5=29 & ALUX & AluConst & cond4=1
+:"IF NE" "AR" "=" ALUX "AND" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; AR=ALUX&AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUX "OR" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=29 & ALUX & AluConst & cond4=1
 { if(AZF!=0) goto inst_next; AR=ALUX|AluConst; alu_flags_logic(AR); }
+:"IF NE" "AR" "=" ALUX "OR" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=29 & ALUX & AluConst & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; AR=ALUX|AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
 
 # Opt-in for an exactly proven negative SE at a specific instruction address.
 # Context is not inferred from the mnemonic: the generic dynamic-SE semantics
 # below stay the default. This constructor is safe only where native trace
 # establishes SE<0 and no intervening write/call can change the register.
-:SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is codec_se_proven_negative=1 & type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is codec_se_proven_negative=1 & type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local addr:2 = ShiftDagI;
     local step:2 = ShiftDagM;
@@ -1536,45 +1837,60 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
     local res:4 = src s>> magnitude;
     SR0 = res:2;
     SR1 = res[16,16];
-    *[DM]:2 addr = stored;
-    ShiftDagI = addr + step;
+    *[DM]:2 ShiftDmAddress = stored;
+    dsp_dag_postmodify(ShiftDagI, addr, step, ShiftDagL);
 }
 
-:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local addr:2 = ShiftDagI;
     local step:2 = ShiftDagM;
-    local fetched:2 = *[DM]:2 addr;
+    local fetched:2 = *[DM]:2 ShiftDmAddress;
     local src:4 = sext(ShiftX) << 16;
     local magnitude:2 = -SE;
     local res:4 = src s>> magnitude;
     SR0 = res:2;
     SR1 = res[16,16];
     DReg4 = fetched;
-    ShiftDagI = addr + step;
+    dsp_dag_postmodify(ShiftDagI, addr, step, ShiftDagL);
 }
 
-:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_negative=1 & type12=9 & shift_d=0 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local addr:2 = ShiftDagI;
     local step:2 = ShiftDagM;
-    local fetched:2 = *[DM]:2 addr;
+    local fetched:2 = *[DM]:2 ShiftDmAddress;
     local src:4 = sext(ShiftX);
     local magnitude:2 = -SE;
     local res:4 = src s>> magnitude;
     SR0 = res:2;
     SR1 = res[16,16];
     DReg4 = fetched;
-    ShiftDagI = addr + step;
+    dsp_dag_postmodify(ShiftDagI, addr, step, ShiftDagL);
+}
+
+# Proven-negative SE in native register-parallel ASHIFT (LO): the default
+# remains the dynamic signed-count branch. This is selected ONLY with the
+# instruction-scoped, externally verified codec_se_proven_negative context.
+# Read DReg before writing DReg4, preserving DSP parallel-data semantics.
+:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" DReg is codec_se_proven_negative=1 & op8=0x10 & sf4=6 & ShiftX & DReg4 & DReg
+{
+    local moved:2 = DReg;
+    local src:4 = sext(ShiftX);
+    local magnitude:2 = -SE;
+    local result:4 = src s>> magnitude;
+    SR0 = result:2;
+    SR1 = result[16,16];
+    DReg4 = moved;
 }
 
 # Type 12: shift plus DM read/write.
-:SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
-{ local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=zext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12lhi_r>; res=src<<count; goto <t12lhi_d>; <t12lhi_r> count=-count; res=src>>count; <t12lhi_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m; }
-:SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
-{ local a:2=ShiftDagI; local m:2=ShiftDagM; local stored:2=DReg4; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12awh_r>; res=src<<count; goto <t12awh_d>; <t12awh_r> count=-count; res=src s>>count; <t12awh_d> SR0=res:2; SR1=res[16,16]; *[DM]:2 a=stored; ShiftDagI=a+m; }
-:SR "=" "ASHIFT" ShiftX "(LO)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is type12=9 & shift_d=1 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
-{ local a:2=ShiftDagI; local m:2=ShiftDagM; local stored:2=DReg4; local src:4=sext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <t12awl_r>; res=src<<count; goto <t12awl_d>; <t12awl_r> count=-count; res=src s>>count; <t12awl_d> SR0=res:2; SR1=res[16,16]; *[DM]:2 a=stored; ShiftDagI=a+m; }
+:SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{ local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12lhi_r>; res=src<<count; goto <t12lhi_d>; <t12lhi_r> count=-count; res=src>>count; <t12lhi_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
+:SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{ local a:2=ShiftDagI; local m:2=ShiftDagM; local stored:2=DReg4; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12awh_r>; res=src<<count; goto <t12awh_d>; <t12awh_r> count=-count; res=src s>>count; <t12awh_d> SR0=res:2; SR1=res[16,16]; *[DM]:2 ShiftDmAddress=stored; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
+:SR "=" "ASHIFT" ShiftX "(LO)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is type12=9 & shift_d=1 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{ local a:2=ShiftDagI; local m:2=ShiftDagM; local stored:2=DReg4; local src:4=sext(ShiftX); local count:2=SE; local negative:1=count s<0; local mask:4=-zext(negative); local countmask:2=mask:2; local magnitude:2=-count; local leftcount:2=count & ~countmask; local rightcount:2=magnitude & countmask; local leftval:4=src<<leftcount; local rightval:4=src s>>rightcount; local res:4=(leftval & ~mask) | (rightval & mask); SR0=res:2; SR1=res[16,16]; *[DM]:2 ShiftDmAddress=stored; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
 
 # Type 14/16 additional shifter forms.
 :SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" DReg is op8=0x10 & sf4=0 & ShiftX & DReg4 & DReg
@@ -1587,29 +1903,29 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { local src:4=sext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <t16alo_r>; res=src<<count; goto <t16alo_d>; <t16alo_r> count=-count; res=src s>>count; <t16alo_d> SR0=res:2; SR1=res[16,16]; }
 
 # Deep shift reachable forms.
-:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=2 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
-{ local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=zext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <deep_t12llo_r>; res=src<<count; goto <deep_t12llo_d>; <deep_t12llo_r> count=-count; res=src>>count; <deep_t12llo_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m; }
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=2 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{ local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <deep_t12llo_r>; res=src<<count; goto <deep_t12llo_d>; <deep_t12llo_r> count=-count; res=src>>count; <deep_t12llo_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
 :SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" DReg is op8=0x10 & sf4=4 & ShiftX & DReg4 & DReg
 { local moved:2=DReg; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <deep_t14ahi_r>; res=src<<count; goto <deep_t14ahi_d>; <deep_t14ahi_r> count=-count; res=src s>>count; <deep_t14ahi_d> SR0=res:2; SR1=res[16,16]; DReg4=moved; }
 :SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" DReg is op8=0x10 & sf4=6 & ShiftX & DReg4 & DReg
-{ local moved:2=DReg; local src:4=sext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <deep_t14alo_r>; res=src<<count; goto <deep_t14alo_d>; <deep_t14alo_r> count=-count; res=src s>>count; <deep_t14alo_d> SR0=res:2; SR1=res[16,16]; DReg4=moved; }
+{ local moved:2=DReg; local src:4=sext(ShiftX); local count:2=SE; local negative:1=count s<0; local mask:4=-zext(negative); local countmask:2=mask:2; local magnitude:2=-count; local leftcount:2=count & ~countmask; local rightcount:2=magnitude & countmask; local leftval:4=src<<leftcount; local rightval:4=src s>>rightcount; local res:4=(leftval & ~mask) | (rightval & mask); SR0=res:2; SR1=res[16,16]; DReg4=moved; }
 :SR "=" "ASHIFT" ShiftX "(HI)" is op8=0x0e & sf4=4 & ShiftX & mid4=0 & cond4=15
 { local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <deep_t16ahi_r>; res=src<<count; goto <deep_t16ahi_d>; <deep_t16ahi_r> count=-count; res=src s>>count; <deep_t16ahi_d> SR0=res:2; SR1=res[16,16]; }
 
 
-:SR "=" "SR OR LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=1 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "SR OR LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=1 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
-    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=zext(ShiftX)<<16; local count:2=SE; local shifted:4=src;
+    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX)<<16; local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t12orhi_r>; shifted=src<<count; goto <final_t12orhi_d>;
 <final_t12orhi_r> count=-count; shifted=src>>count;
-<final_t12orhi_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m;
+<final_t12orhi_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
-:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=3 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=3 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
-    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
+    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t12orlo_r>; shifted=src<<count; goto <final_t12orlo_d>;
 <final_t12orlo_r> count=-count; shifted=src>>count;
-<final_t12orlo_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m;
+<final_t12orlo_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
 
 # Deep T9 rounded subtract.
@@ -1622,9 +1938,9 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 :AF "=" ALUX "XOR" ALUY "," DReg4 "=" DReg is type9=5 & z18=1 & amf5=30 & ALUX & ALUY & DReg4 & DReg
 { local moved:2=DReg; AF=ALUX^ALUY; DReg4=moved; alu_flags_logic(AF); }
 :"MR =" MACX "*" MACY "(SU)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=5 & MACX & MACY & DReg4 & DReg
-{ local moved:2=DReg; local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <deep_t8su_d>; MR2=0xffff; <deep_t8su_d> DReg4=moved; MVF=0; }
+{ local moved:2=DReg; local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; DReg4=moved; MVF=0; }
 :"MR =" MACX "*" MACY "(US)," DReg4 "=" DReg is type9=5 & z18=0 & amf5=6 & MACX & MACY & DReg4 & DReg
-{ local moved:2=DReg; local x:4=zext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <deep_t8us_d>; MR2=0xffff; <deep_t8us_d> DReg4=moved; MVF=0; }
+{ local moved:2=DReg; local x:4=zext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; DReg4=moved; MVF=0; }
 
 :AF "=" ALUY "- 1," DReg4 "=" DReg is type9=5 & z18=1 & amf5=24 & ALUY & DReg4 & DReg
 { local moved:2=DReg; local y:2=ALUY; AF=y-1; DReg4=moved; alu_flags_sub(y,1:2,AF); }
@@ -1634,58 +1950,66 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { local moved:2=DReg; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MF=res[16,16]; DReg4=moved; }
 
 # Deep Type 5 PM-write forms.
-:"MR =" MACX "*" MACY "(RND)," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_round_xy(MACX,MACY); local word:3=(zext(stored)<<8)|(zext(PX)&0xff); *[PM]:3 a=word; DagI=a+m; }
-:"MR =" MACX "*" MACY "(SS)," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <deep_t5ss_d>; MR2=0xffff; <deep_t5ss_d> local word:3=(zext(stored)<<8)|(zext(PX)&0xff); *[PM]:3 a=word; DagI=a+m; MVF=0; }
-:AR "=" ALUX "-" ALUY "," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x-y; local word:3=(zext(stored)<<8)|(zext(PX)&0xff); *[PM]:3 a=word; DagI=a+m; alu_flags_sub(x,y,AR); }
+:"MR =" MACX "*" MACY "(RND)," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=1 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_round_xy(MACX,MACY); local word:3=(zext(stored)<<8)|(zext(PX)&0xff); dsp_pm_store24(a,word); dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR =" MACX "*" MACY "(SS)," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; local word:3=(zext(stored)<<8)|(zext(PX)&0xff); dsp_pm_store24(a,word); dsp_dag_postmodify(DagI, a, m, DagL); MVF=0; }
+:AR "=" ALUX "-" ALUY "," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x-y; local word:3=(zext(stored)<<8)|(zext(PX)&0xff); dsp_pm_store24(a,word); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AR); }
 
 # Deep Type 4 DM-write forms.
-:"MR = MR -" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=12 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur-prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; *[DM]:2 a=stored; DagI=a+m; }
-:"MR = MR +" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; *[DM]:2 a=stored; DagI=a+m; }
-:"MR = MR -" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_sub_round_xy(MACX,MACY); *[DM]:2 a=stored; DagI=a+m; }
-:"MR =" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <deep_t4ss_d>; MR2=0xffff; <deep_t4ss_d> *[DM]:2 a=stored; DagI=a+m; MVF=0; }
-:AR "=" ALUX "-" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x-y; *[DM]:2 a=stored; DagI=a+m; alu_flags_sub(x,y,AR); }
+:"MR = MR -" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=12 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur-prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR = MR +" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=8 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR = MR -" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_sub_round_xy(MACX,MACY); *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); }
+# Exact zero product, parallel DM write: latch old DReg4 before clearing the accumulator.
+:"MR = MX0 * 0 (SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=4 & xop3=0 & yop2=3 & DReg4 & DagI & DagM & DagDmAddress & DagL
+{
+    local a:2=DagI; local m:2=DagM; local stored:2=DReg4;
+    MR0=0; MR1=0; MR2=0;
+    *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); MVF=0;
+}
+
+:"MR =" MACX "*" MACY "(SS)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=4 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=sext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); MVF=0; }
+:AR "=" ALUX "-" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x-y; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AR); }
 
 # Deep Type 4 DM-read forms.
-:"MR = MR -" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=12 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur-prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=v; DagI=a+m; }
-:"MR = MR +" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; dsp_mac_acc_round_xy(MACX,MACY); DReg4=v; DagI=a+m; }
-:"MR = MR -" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; dsp_mac_sub_round_xy(MACX,MACY); DReg4=v; DagI=a+m; }
-:AF "=" ALUX "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 a; local x:2=ALUX; local y:2=ALUY; AF=x-y; DReg4=v; DagI=a+m; alu_flags_sub(x,y,AF); }
+:"MR = MR -" MACX "*" MACY "(SS)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=12 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur-prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR = MR +" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; dsp_mac_acc_round_xy(MACX,MACY); DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); }
+:"MR = MR -" MACX "*" MACY "(RND)," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; dsp_mac_sub_round_xy(MACX,MACY); DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); }
+:AF "=" ALUX "-" ALUY "," DReg4 "=" "DM(" DagI "," DagM ")" is type3=3 & d19=0 & z18=1 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local v:2=*[DM]:2 DagDmAddress; local x:2=ALUX; local y:2=ALUY; AF=x-y; DReg4=v; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AF); }
 
 # Deep Type 1 reachable forms.
-:"MR = MR +" MACX "*" MACY "(RND)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=2 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM
-{ local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da; dsp_mac_acc_round_xy(MACX,MACY); PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm; }
-:"MR = MR -" MACX "*" MACY "(RND)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=3 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM
-{ local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=*[PM]:3 pa; local dv:2=*[DM]:2 da; dsp_mac_sub_round_xy(MACX,MACY); PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; PmI=pa+pm; DmI=da+dm; }
+:"MR = MR +" MACX "*" MACY "(RND)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=2 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
+{ local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress; dsp_mac_acc_round_xy(MACX,MACY); PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL); }
+:"MR = MR -" MACX "*" MACY "(RND)," PDReg "=" "PM(" PmI "," PmM ")," DDReg "=" "DM(" DmI "," DmM ")" is t1_type=3 & amf5=3 & MACX & MACY & PDReg & DDReg & PmI & PmM & DmI & DmM & DualDmAddress & PmL & DmL
+{ local pa:2=PmI; local pm:2=PmM; local da:2=DmI; local dm:2=DmM; local pw:3=dsp_pm_load24(pa); local dv:2=*[DM]:2 DualDmAddress; dsp_mac_sub_round_xy(MACX,MACY); PDReg=pw[8,16]; PX=zext(pw[0,8]); DDReg=dv; dsp_dag_postmodify(PmI, pa, pm, PmL); dsp_dag_postmodify(DmI, da, dm, DmL); }
 
 
 # Final reachable codec-profile ALU/MAC + memory forms.
-:AF "=" ALUX "+" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AF=x+y; *[DM]:2 a=stored; DagI=a+m; alu_flags_add(x,y,AF); }
-:"MR = MR +" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_acc_round_xy(MACX,MACY); *[DM]:2 a=stored; DagI=a+m; }
-:AF "=" ALUX "-" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=1 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AF=x-y; *[DM]:2 a=stored; DagI=a+m; alu_flags_sub(x,y,AF); }
-:"MR =" MACX "*" MACY "(SU)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=5 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; MR2=0; if(prod s>=0) goto <final_t4su_d>; MR2=0xffff; <final_t4su_d> *[DM]:2 a=stored; DagI=a+m; MVF=0; }
+:AF "=" ALUX "+" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=1 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AF=x+y; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AF); }
+:"MR = MR +" MACX "*" MACY "(RND)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=2 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; dsp_mac_acc_round_xy(MACX,MACY); *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); }
+:AF "=" ALUX "-" ALUY "," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=1 & amf5=23 & ALUX & ALUY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AF=x-y; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(x,y,AF); }
+:"MR =" MACX "*" MACY "(SU)," "DM(" DagI "," DagM ")" "=" DReg4 is type3=3 & d19=1 & z18=0 & amf5=5 & MACX & MACY & DReg4 & DagI & DagM & DagDmAddress & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:4=sext(MACX); local y:4=zext(MACY); local prod:4=x*y; MR0=prod:2; MR1=prod[16,16]; local sign:4=prod s>>31; MR2=sign:2; *[DM]:2 DagDmAddress=stored; dsp_dag_postmodify(DagI, a, m, DagL); MVF=0; }
 
-:AR "=" ALUY "-" ALUX "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local y:2=ALUY; local x:2=ALUX; AR=y-x; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; alu_flags_sub(y,x,AR); }
-:"MR = MR -" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; dsp_mac_sub_round_xy(MACX,MACY); DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m; }
-:AR "=" ALUX "+" ALUY "," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM
-{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x+y; local word:3=(zext(stored)<<8)|(zext(PX)&0xff); *[PM]:3 a=word; DagI=a+m; alu_flags_add(x,y,AR); }
+:AR "=" ALUY "-" ALUX "," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=25 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local y:2=ALUY; local x:2=ALUX; AR=y-x; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_sub(y,x,AR); }
+:"MR = MR -" MACX "*" MACY "(RND)," DReg4 "=" "PM(" DagI "," DagM ")" is op4=5 & d19=0 & z18=0 & amf5=3 & MACX & MACY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); dsp_mac_sub_round_xy(MACX,MACY); DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL); }
+:AR "=" ALUX "+" ALUY "," "PM(" DagI "," DagM ")" "=" DReg4 is op4=5 & d19=1 & z18=0 & amf5=19 & ALUX & ALUY & DReg4 & DagI & DagM & DagL
+{ local a:2=DagI; local m:2=DagM; local stored:2=DReg4; local x:2=ALUX; local y:2=ALUY; AR=x+y; local word:3=(zext(stored)<<8)|(zext(PX)&0xff); dsp_pm_store24(a,word); dsp_dag_postmodify(DagI, a, m, DagL); alu_flags_add(x,y,AR); }
 
 :"MF = MR +" MACX "*" MACY "(SS)" is type9=4 & z18=1 & amf5=8 & MACX & MACY & mid4=0 & cond4=15
 { local x:8=sext(MACX); local y:8=sext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MF=res[16,16]; }
@@ -1693,18 +2017,42 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { dsp_mac_round_mf_xy(MACX,MACY); }
 :"MR = MR +" MACX "*" MACY "(SU)" is type9=4 & z18=0 & amf5=9 & MACX & MACY & mid4=0 & cond4=15
 { local x:8=sext(MACX); local y:8=zext(MACY); local prod:8=x*y; local cur:8=(zext(MR2)<<32)|(zext(MR1)<<16)|zext(MR0); local res:8=cur+prod; MR0=res:2; MR1=res[16,16]; MR2=res[32,16]; }
-:"IF LE" "AR" "=" ALUY "+ 1" is type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=3
+:"IF LE" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=3
 { local take:1=(AZF!=0)||(ANF!=AVF); if(take==0) goto inst_next; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR); }
-:"IF AC" "AR" "=" ALUY is type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=8
+:"IF LE" "AR" "=" ALUY "+ 1" is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=17 & ALUY & mid4=0 & cond4=3
+{ local take:1=(AZF!=0)||(ANF!=AVF); if(take==0) goto <arch_condition_skipped>; local y:2=ALUY; AR=y+1; alu_flags_add(y,1:2,AR);
+<arch_condition_skipped>
+}
+:"IF AC" "AR" "=" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=8
 { if(ACF==0) goto inst_next; AR=ALUY; alu_flags_logic(AR); }
-:"IF EQ" "AR" "=" ALUX "AND" AluConst is type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=0
+:"IF AC" "AR" "=" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=16 & ALUY & mid4=0 & cond4=8
+{ if(ACF==0) goto <arch_condition_skipped>; AR=ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF EQ" "AR" "=" ALUX "AND" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=0
 { if(AZF==0) goto inst_next; AR=ALUX&AluConst; alu_flags_logic(AR); }
-:"IF NE" "AR" "=" ALUY "-" ALUX is type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=1
+:"IF EQ" "AR" "=" ALUX "AND" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=28 & ALUX & AluConst & cond4=0
+{ if(AZF==0) goto <arch_condition_skipped>; AR=ALUX&AluConst; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
+:"IF NE" "AR" "=" ALUY "-" ALUX is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=1
 { if(AZF!=0) goto inst_next; local y:2=ALUY; local x:2=ALUX; AR=y-x; alu_flags_sub(y,x,AR); }
-:"IF LT" "AR" "=" ALUX "+" AluConst is type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=4
+:"IF NE" "AR" "=" ALUY "-" ALUX is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=25 & ALUX & ALUY & mid4=0 & cond4=1
+{ if(AZF!=0) goto <arch_condition_skipped>; local y:2=ALUY; local x:2=ALUX; AR=y-x; alu_flags_sub(y,x,AR);
+<arch_condition_skipped>
+}
+:"IF LT" "AR" "=" ALUX "+" AluConst is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=4
 { if(ANF==AVF) goto inst_next; local x:2=ALUX; local c:2=AluConst; AR=x+c; alu_flags_add(x,c,AR); }
-:"IF NOT AV" "AR" "=" ALUX "OR" ALUY is type9=4 & z18=0 & amf5=29 & ALUX & ALUY & mid4=0 & cond4=7
+:"IF LT" "AR" "=" ALUX "+" AluConst is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=19 & ALUX & AluConst & cond4=4
+{ if(ANF==AVF) goto <arch_condition_skipped>; local x:2=ALUX; local c:2=AluConst; AR=x+c; alu_flags_add(x,c,AR);
+<arch_condition_skipped>
+}
+:"IF NOT AV" "AR" "=" ALUX "OR" ALUY is codec_arch_stack_mode=0 & type9=4 & z18=0 & amf5=29 & ALUX & ALUY & mid4=0 & cond4=7
 { if(AVF!=0) goto inst_next; AR=ALUX|ALUY; alu_flags_logic(AR); }
+:"IF NOT AV" "AR" "=" ALUX "OR" ALUY is codec_arch_stack_mode=1 & type9=4 & z18=0 & amf5=29 & ALUX & ALUY & mid4=0 & cond4=7
+{ if(AVF!=0) goto <arch_condition_skipped>; AR=ALUX|ALUY; alu_flags_logic(AR);
+<arch_condition_skipped>
+}
 
 # -----------------------------------------------------------------------------
 # Type 10 flow control.  srvdsp uses NE, GT, LT, and ALWAYS.
@@ -1720,7 +2068,7 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 # The numeric target remains explicit in P-code/C output.
 # -----------------------------------------------------------------------------
 
-define pcodeop dsp_resident_tailcall;
+
 
 macro resident_tail(target) {
     dsp_resident_tailcall(target);
@@ -1728,65 +2076,71 @@ macro resident_tail(target) {
 }
 
 # Unconditional resident targets observed in the srvdsp corpus.
-:JUMP_RESIDENT_00E0 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x00e0 & cond4=15 { resident_tail(0x00e0:2); }
-:JUMP_RESIDENT_0036 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0036 & cond4=15 { resident_tail(0x0036:2); }
-:JUMP_RESIDENT_0539 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=15 { resident_tail(0x0539:2); }
-:JUMP_RESIDENT_05A4 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x05a4 & cond4=15 { resident_tail(0x05a4:2); }
-:JUMP_RESIDENT_08ED is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x08ed & cond4=15 { resident_tail(0x08ed:2); }
-:JUMP_RESIDENT_0EBB is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0ebb & cond4=15 { resident_tail(0x0ebb:2); }
-:JUMP_RESIDENT_04BC is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x04bc & cond4=15 { resident_tail(0x04bc:2); }
-:JUMP_RESIDENT_092C is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x092c & cond4=15 { resident_tail(0x092c:2); }
-:JUMP_RESIDENT_0398 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0398 & cond4=15 { resident_tail(0x0398:2); }
-:JUMP_RESIDENT_10C5 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x10c5 & cond4=15 { resident_tail(0x10c5:2); }
-:JUMP_RESIDENT_0231 is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0231 & cond4=15 { resident_tail(0x0231:2); }
+:JUMP_RESIDENT_00E0 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x00e0 & cond4=15 { resident_tail(0x00e0:2); }
+:JUMP_RESIDENT_0036 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0036 & cond4=15 { resident_tail(0x0036:2); }
+:JUMP_RESIDENT_0539 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=15 { resident_tail(0x0539:2); }
+:JUMP_RESIDENT_05A4 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x05a4 & cond4=15 { resident_tail(0x05a4:2); }
+:JUMP_RESIDENT_08ED is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x08ed & cond4=15 { resident_tail(0x08ed:2); }
+:JUMP_RESIDENT_0EBB is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0ebb & cond4=15 { resident_tail(0x0ebb:2); }
+:JUMP_RESIDENT_04BC is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x04bc & cond4=15 { resident_tail(0x04bc:2); }
+:JUMP_RESIDENT_092C is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x092c & cond4=15 { resident_tail(0x092c:2); }
+:JUMP_RESIDENT_0398 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0398 & cond4=15 { resident_tail(0x0398:2); }
+:JUMP_RESIDENT_10C5 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x10c5 & cond4=15 { resident_tail(0x10c5:2); }
+:JUMP_RESIDENT_0231 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0231 & cond4=15 { resident_tail(0x0231:2); }
 
 # Conditional resident handoffs used by srvdsp.
-:"IF GT JUMP_RESIDENT_0539" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=2
+:"IF GT JUMP_RESIDENT_0539" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=2
 {
     local gt:1 = (AZF == 0) && (ANF == AVF);
     if (gt == 0) goto inst_next;
     resident_tail(0x0539:2);
 }
 
-:"IF LT JUMP_RESIDENT_0539" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=4
+:"IF LT JUMP_RESIDENT_0539" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0539 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     resident_tail(0x0539:2);
 }
 
-:"IF NE JUMP_RESIDENT_0D04" is srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0d04 & cond4=1
+:"IF NE JUMP_RESIDENT_0D04" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type10=3 & call18=0 & addr14=0x0d04 & cond4=1
 {
     if (AZF != 0) goto inst_next;
     resident_tail(0x0d04:2);
 }
 
-:JUMP JumpAddr is type10=3 & call18=0 & cond4=15 & JumpAddr
+:JUMP JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=15 & JumpAddr
 {
     goto JumpAddr;
 }
 
-:CALL JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=15 & JumpAddr
+:CALL JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=15 & JumpAddr
 {
     codec_call_push(inst_next / 3);
     call JumpAddr;
 }
 
-:CALL JumpAddr is type10=3 & call18=1 & cond4=15 & JumpAddr
+:CALL JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=1 & cond4=15 & JumpAddr
 {
     call JumpAddr;
 }
 
-:"IF EQ JUMP" JumpAddr is type10=3 & call18=0 & cond4=0 & JumpAddr
+:"IF EQ JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=0 & JumpAddr
 {
     if (AZF != 0) goto JumpAddr;
 }
 
-:"IF NE JUMP" JumpAddr is type10=3 & call18=0 & cond4=1 & JumpAddr
+# Static-flow opt-in: all inputs to the native conditional predicate are
+# exactly proven false on every reachable entry.  No jump edge exists.
+:"IF NE JUMP" JumpAddr is codec_arch_stack_mode=0 & codec_branch_proven_not_taken=1 & type10=3 & call18=0 & cond4=1 & JumpAddr
+{
+}
+
+:"IF NE JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=1 & JumpAddr
 {
     if (AZF == 0) goto JumpAddr;
 }
 
-:"IF GT JUMP" JumpAddr is type10=3 & call18=0 & cond4=2 & JumpAddr
+:"IF GT JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=2 & JumpAddr
 {
     if (AZF != 0) goto <gt_fallthrough>;
     if (ANF == AVF) goto JumpAddr;
@@ -1794,46 +2148,59 @@ macro resident_tail(target) {
 }
 
 
-:"IF LE JUMP" JumpAddr is type10=3 & call18=0 & cond4=3 & JumpAddr
+
+# Opt-in only when a bounded native predecessor chain makes LE definitively
+# true for all incoming states. Other IF LE sites keep their original flags.
+:"IF LE JUMP" JumpAddr is codec_arch_stack_mode=0 & codec_le_proven_taken=1 & type10=3 & call18=0 & cond4=3 & JumpAddr
+{
+    goto JumpAddr;
+}
+
+# Scope to an independently proven constant-false LE at this native site.
+:"IF LE JUMP" JumpAddr is codec_arch_stack_mode=0 & codec_branch_proven_not_taken=1 & type10=3 & call18=0 & cond4=3 & JumpAddr
+{
+}
+
+:"IF LE JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=3 & JumpAddr
 {
     local le:1 = (AZF != 0) || (ANF != AVF);
     if (le != 0) goto JumpAddr;
 }
 
-:"IF NE CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=1 & JumpAddr
+:"IF NE CALL" JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=1 & JumpAddr
 {
     if (AZF != 0) goto inst_next;
     codec_call_push(inst_next / 3);
     call JumpAddr;
 }
 
-:"IF NE CALL" JumpAddr is type10=3 & call18=1 & cond4=1 & JumpAddr
+:"IF NE CALL" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=1 & cond4=1 & JumpAddr
 {
     if (AZF != 0) goto inst_next;
     call JumpAddr;
 }
 
-:"IF LT JUMP" JumpAddr is type10=3 & call18=0 & cond4=4 & JumpAddr
+:"IF LT JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=4 & JumpAddr
 {
     if (ANF != AVF) goto JumpAddr;
 }
 
-:"IF NEG JUMP" JumpAddr is type10=3 & call18=0 & cond4=10 & JumpAddr
+:"IF NEG JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=10 & JumpAddr
 {
     if (ASF != 0) goto JumpAddr;
 }
 
-:"IF POS JUMP" JumpAddr is type10=3 & call18=0 & cond4=11 & JumpAddr
+:"IF POS JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=11 & JumpAddr
 {
     if (ASF == 0) goto JumpAddr;
 }
 
-:"IF GE JUMP" JumpAddr is type10=3 & call18=0 & cond4=5 & JumpAddr
+:"IF GE JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=5 & JumpAddr
 {
     if (ANF == AVF) goto JumpAddr;
 }
 
-:"IF GT CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=2 & JumpAddr
+:"IF GT CALL" JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=2 & JumpAddr
 {
     if(AZF!=0) goto inst_next;
     if(ANF!=AVF) goto inst_next;
@@ -1841,34 +2208,34 @@ macro resident_tail(target) {
     call JumpAddr;
 }
 
-:"IF GT CALL" JumpAddr is type10=3 & call18=1 & cond4=2 & JumpAddr
+:"IF GT CALL" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=1 & cond4=2 & JumpAddr
 {
     if(AZF!=0) goto inst_next;
     if(ANF!=AVF) goto inst_next;
     call JumpAddr;
 }
 
-:"IF LT CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=4 & JumpAddr
+:"IF LT CALL" JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=4 & JumpAddr
 {
     if (ANF == AVF) goto inst_next;
     codec_call_push(inst_next / 3);
     call JumpAddr;
 }
 
-:"IF LT CALL" JumpAddr is type10=3 & call18=1 & cond4=4 & JumpAddr
+:"IF LT CALL" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=1 & cond4=4 & JumpAddr
 {
     if (ANF == AVF) goto inst_next;
     call JumpAddr;
 }
 
-:"IF EQ CALL" JumpAddr is codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=0 & JumpAddr
+:"IF EQ CALL" JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & type10=3 & call18=1 & cond4=0 & JumpAddr
 {
     if (AZF == 0) goto inst_next;
     codec_call_push(inst_next / 3);
     call JumpAddr;
 }
 
-:"IF EQ CALL" JumpAddr is type10=3 & call18=1 & cond4=0 & JumpAddr
+:"IF EQ CALL" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=1 & cond4=0 & JumpAddr
 {
     if (AZF == 0) goto inst_next;
     call JumpAddr;
@@ -1887,7 +2254,7 @@ macro resident_tail(target) {
 # -----------------------------------------------------------------------------
 
 
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=0 & type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=0 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
     DSP_LOOP_START_SHADOW = DSP_LOOP_START;
@@ -1896,18 +2263,18 @@ macro resident_tail(target) {
 }
 
 # EXPERIMENT: depth known per native instruction, so no runtime stack switch.
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
     DSP_STATIC_START_OUTER = inst_next / 3;
 }
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
     DSP_STATIC_START_INNER = inst_next / 3;
 }
 
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type11=5 & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
     local start:2 = inst_next / 3; # PM addresses are 24-bit instruction words
@@ -1924,7 +2291,7 @@ macro resident_tail(target) {
 <do_done>
 }
 
-:"DO" LoopAddr "UNTIL CE" is srvdsp_wrapper_mode=1 & type11=5 & loop14=0x186c & term4=14 & LoopAddr
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=1 & type11=5 & loop14=0x186c & term4=14 & LoopAddr
     [ srvdsp_ce_loop_end=1; globalset(LoopAddr, srvdsp_ce_loop_end); ]
 {
 }
@@ -1933,35 +2300,32 @@ macro resident_tail(target) {
 # Type 12/13 shift+memory forms reached by codec profiles.
 # -----------------------------------------------------------------------------
 
-:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
-    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src;
+    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src;
     if (count s<0) goto <t12ahi_r>; res=src<<count; goto <t12ahi_d>;
 <t12ahi_r> count=-count; res=src s>>count;
-<t12ahi_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m;
+<t12ahi_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
-:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM
+:SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=6 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
-    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 a; local src:4=sext(ShiftX); local count:2=SE; local res:4=src;
-    if (count s<0) goto <t12alo_r>; res=src<<count; goto <t12alo_d>;
-<t12alo_r> count=-count; res=src s>>count;
-<t12alo_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; ShiftDagI=a+m;
+    local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=sext(ShiftX); local count:2=SE; local negative:1=count s<0; local mask:4=-zext(negative); local countmask:2=mask:2; local magnitude:2=-count; local leftcount:2=count & ~countmask; local rightcount:2=magnitude & countmask; local leftval:4=src<<leftcount; local rightval:4=src s>>rightcount; local res:4=(leftval & ~mask) | (rightval & mask); SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
-:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=2 & ShiftX & DReg4 & DagI & DagM
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=2 & ShiftX & DReg4 & DagI & DagM & DagL
 {
-    local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local src:4=zext(ShiftX); local count:2=SE; local res:4=src;
+    local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local src:4=zext(ShiftX); local count:2=SE; local res:4=src;
     if (count s<0) goto <t13l_r>; res=src<<count; goto <t13l_d>;
 <t13l_r> count=-count; res=src>>count;
-<t13l_d> SR0=res:2; SR1=res[16,16]; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m;
+<t13l_d> SR0=res:2; SR1=res[16,16]; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL);
 }
 
 
-:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=3 & ShiftX & DReg4 & DagI & DagM
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=3 & ShiftX & DReg4 & DagI & DagM & DagL
 {
-    local a:2=DagI; local m:2=DagM; local word:3=*[PM]:3 a; local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
+    local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t13or_r>; shifted=src<<count; goto <final_t13or_d>;
 <final_t13or_r> count=-count; shifted=src>>count;
-<final_t13or_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=word[8,16]; PX=zext(word[0,8]); DagI=a+m;
+<final_t13or_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=word[8,16]; PX=zext(word[0,8]); dsp_dag_postmodify(DagI, a, m, DagL);
 }
 
 # Immediate logical shift OR forms: split by the encoded sign to avoid
@@ -2015,12 +2379,28 @@ macro resident_tail(target) {
 { dsp_exp_hi(ShiftX); }
 
 # Type 19 unconditional indirect flow. The observed corpus uses I4-I7.
-:"JUMP (" JumpI ")" is op8=0x0b & ind_s=0 & cond4=15 & JumpI
+:"JUMP (" JumpI ")" is codec_arch_stack_mode=0 & op8=0x0b & ind_s=0 & cond4=15 & JumpI
 { goto [JumpI]; }
-:"CALL (" JumpI ")" is op8=0x0b & ind_s=1 & cond4=15 & JumpI
+:"CALL (" JumpI ")" is codec_arch_stack_mode=0 & op8=0x0b & ind_s=1 & cond4=15 & JumpI
 { call [JumpI]; }
 
 # -----------------------------------------------------------------------------
+# Bounded adjacent-LDI-SE source-verified Type16 bare LSHIFT(LO).
+# Generic signed-count LSHIFT remains default elsewhere.
+:SR "=" "LSHIFT" ShiftX "(LO)" is codec_se_proven_negative=1 & codec_se_proven_nonnegative=0 & op8=0x0e & sf4=2 & ShiftX & mid4=0 & cond4=15
+{
+ local src:4=zext(ShiftX);
+ local magnitude:2=-SE;
+ local output:4=src >> magnitude;
+ SR0=output:2; SR1=output[16,16];
+}
+:SR "=" "LSHIFT" ShiftX "(LO)" is codec_se_proven_nonnegative=1 & codec_se_proven_negative=0 & op8=0x0e & sf4=2 & ShiftX & mid4=0 & cond4=15
+{
+ local src:4=zext(ShiftX);
+ local output:4=src << SE;
+ SR0=output:2; SR1=output[16,16];
+}
+
 # Type 14/16 codec-profile shifter forms.  Non-immediate shifts use SE.
 # These are limited to the LO variants exercised in the current corpus.
 # -----------------------------------------------------------------------------
@@ -2030,14 +2410,15 @@ macro resident_tail(target) {
     local src:4 = zext(ShiftX);
     local moved:2 = DReg;
     local count:2 = SE;
-    local res:4 = src;
-    if (count s< 0) goto <t14_lsh_right>;
-    res = src << count;
-    goto <t14_lsh_done>;
-<t14_lsh_right>
-    count = -count;
-    res = src >> count;
-<t14_lsh_done>
+    local negative:1 = count s< 0;
+    local mask:4 = -zext(negative);
+    local countmask:2 = mask:2;
+    local magnitude:2 = -count;
+    local leftcount:2 = count & ~countmask;
+    local rightcount:2 = magnitude & countmask;
+    local leftval:4 = src << leftcount;
+    local rightval:4 = src >> rightcount;
+    local res:4 = (leftval & ~mask) | (rightval & mask);
     SR0 = res:2;
     SR1 = res[16,16];
     DReg4 = moved;
@@ -2047,14 +2428,15 @@ macro resident_tail(target) {
 {
     local src:4 = zext(ShiftX);
     local count:2 = SE;
-    local res:4 = src;
-    if (count s< 0) goto <t16_lsh_right>;
-    res = src << count;
-    goto <t16_lsh_done>;
-<t16_lsh_right>
-    count = -count;
-    res = src >> count;
-<t16_lsh_done>
+    local negative:1 = count s< 0;
+    local mask:4 = -zext(negative);
+    local countmask:2 = mask:2;
+    local magnitude:2 = -count;
+    local leftcount:2 = count & ~countmask;
+    local rightcount:2 = magnitude & countmask;
+    local leftval:4 = src << leftcount;
+    local rightval:4 = src >> rightcount;
+    local res:4 = (leftval & ~mask) | (rightval & mask);
     SR0 = res:2;
     SR1 = res[16,16];
 }
@@ -2071,6 +2453,25 @@ macro resident_tail(target) {
     count = -count;
     shifted = src >> count;
 <t16_or_done>
+    local oldsr:4 = (zext(SR1) << 16) | zext(SR0);
+    local res:4 = oldsr | shifted;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+
+# Scoped branch-free nonnegative SE variants: opt-in ONLY where the
+# incoming SE is statically proven >= 0.  Dynamic SE keeps normal semantics.
+:SR "=" "ASHIFT" ShiftX "(HI)" is codec_se_proven_nonnegative=1 & op8=0x0e & sf4=4 & ShiftX & mid4=0 & cond4=15
+{
+    local src:4 = sext(ShiftX) << 16;
+    local res:4 = src << SE;
+    SR0 = res:2;
+    SR1 = res[16,16];
+}
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)" is codec_se_proven_nonnegative=1 & op8=0x0e & sf4=3 & ShiftX & mid4=0 & cond4=15
+{
+    local src:4 = zext(ShiftX);
+    local shifted:4 = src << SE;
     local oldsr:4 = (zext(SR1) << 16) | zext(SR0);
     local res:4 = oldsr | shifted;
     SR0 = res:2;
@@ -2157,13 +2558,15 @@ macro resident_tail(target) {
 # Type 23/24 division steps. AQF models the architectural AQ quotient bit.
 :DIVS DivY "," DivX is op8=0x06 & divs_fixed3=0 & DivY & DivX & sexp8=0
 {
-    local divisor:2=DivY;
-    local upper:2=DivX;
+    # The dividend upper half is Y; X is the preserved divisor.
+    # Reference 4-65: shift the dividend into AF:AY0, append the quotient sign.
+    local divisor:2=DivX;
+    local upper:2=DivY;
     local oldq:2=AY0;
     AQF=((upper s<0) != (divisor s<0));
-    local newupper:2=(upper<<1)|(oldq>>15);
-    DivX=newupper;
-    AY0=oldq<<1;
+    AF=(upper<<1)|(oldq>>15);
+    AY0=(oldq<<1)|zext(AQF);
+    ASTAT=(ASTAT & 0xffdf)|(zext(AQF)<<5);
 }
 :DIVQ DivX is op8=0x07 & divq_fixed5=2 & DivX & sexp8=0
 {
@@ -2171,7 +2574,9 @@ macro resident_tail(target) {
     local upper:2=AF;
     local oldq:2=AY0;
     local partial:2=upper;
-    if(AQF!=0) goto <divq_add>;
+    # Respect software initialization of the architectural AQ bit as well
+    # as the value produced by a preceding DIVS/DIVQ (reference 4-63/4-65).
+    if((ASTAT & 0x0020)!=0) goto <divq_add>;
     partial=upper-divisor;
     goto <divq_calc>;
 <divq_add> partial=upper+divisor;
@@ -2180,11 +2585,21 @@ macro resident_tail(target) {
     AF=(partial<<1)|(oldq>>15);
     AY0=(oldq<<1)|zext(newaq==0);
     AQF=newaq;
+    ASTAT=(ASTAT & 0xffdf)|(zext(newaq)<<5);
 }
 
 # -----------------------------------------------------------------------------
 # Type 17 internal data-register move.
 # -----------------------------------------------------------------------------
+
+# Opt-in two-level loop counter save before a native Type17 register move
+# such as CNTR = AR or CNTR = AY0. Only depth 2 uses the outer frame;
+# the generic Type17 move remains unchanged for all other instructions.
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+{
+    DSP_STATIC_CNTR_OUTER = CNTR;
+    IntDst = IntSrc;
+}
 
 :"" IntDst "=" IntSrc is type17=0x0d0 & IntDst & IntSrc
 {
@@ -2194,12 +2609,17 @@ macro resident_tail(target) {
 # Target-observed mode/interrupt controls.
 :DIS_AR_SAT is whole24=0x0c0800 { MSTAT = MSTAT & 0xfff7; }
 :ENA_AR_SAT is whole24=0x0c0c00 { MSTAT = MSTAT | 0x0008; }
-:ENA_SEC_REG is whole24=0x0c0030 { MSTAT = MSTAT | 0x0001; }
-:DIS_SEC_REG is whole24=0x0c0020 { MSTAT = MSTAT & 0xfffe; }
-:DIS_G_MODE is whole24=0x0c0080 { MSTAT = MSTAT & 0xffbf; }
-:ENA_G_MODE is whole24=0x0c00c0 { MSTAT = MSTAT | 0x0040; }
-:DIS_INTS is whole24=0x040040 { dsp_interrupt_disable(); }
-:ENA_INTS is whole24=0x040060 { dsp_interrupt_enable(); }
+:ENA_SEC_REG is codec_arch_stack_mode=0 & whole24=0x0c0030 { MSTAT = MSTAT | 0x0001; }
+:DIS_SEC_REG is codec_arch_stack_mode=0 & whole24=0x0c0020 { MSTAT = MSTAT & 0xfffe; }
+# Mode field BR occupies bits 7:6, not the GO-mode field (bits 3:2).
+# Reference A-5 / 4-159. DAG1 indirect-DM output uses dag1_dm_address;
+# DAG2, direct DM, PM and index post-updates do not reverse their bits.
+:DIS_BIT_REV is whole24=0x0c0080 { MSTAT = MSTAT & 0xfffd; }
+:ENA_BIT_REV is whole24=0x0c00c0 { MSTAT = MSTAT | 0x0002; }
+:DIS_G_MODE is whole24=0x0c0008 { MSTAT = MSTAT & 0xffbf; }
+:ENA_G_MODE is whole24=0x0c000c { MSTAT = MSTAT | 0x0040; }
+:DIS_INTS is codec_arch_stack_mode=0 & whole24=0x040040 { dsp_interrupt_disable(); }
+:ENA_INTS is codec_arch_stack_mode=0 & whole24=0x040060 { dsp_interrupt_enable(); }
 
 # Reference-defined mode controls exercised by codec profiles.
 :DIS_M_MODE is whole24=0x0c2000 { MSTAT = MSTAT & 0xffef; }
@@ -2210,15 +2630,15 @@ macro resident_tail(target) {
 # Type 21 MODIFY.  Circular-buffer modulus details are not represented by the
 # current register-only model; this matches the linear/post-modify behavior
 # already used by the modeled DAG memory-access forms.
-:"MODIFY(" ModI "," ModM ")" is op8=0x09 & mod_zero11=0 & ModI & ModM
+:"MODIFY(" ModI "," ModM ")" is op8=0x09 & mod_zero11=0 & ModI & ModM & ModL
 {
-    ModI = ModI + ModM;
+    dsp_dag_postmodify(ModI, ModI, ModM, ModL);
 }
 
 # Type 26 exact stack-control word observed in AC-3: POP every architected
 # stack class.  Stack backing stores are not modeled, so preserve each effect
 # explicitly rather than pretending the pops are no-ops.
-:"POP STS, POP CNTR, POP PC, POP LOOP" is whole24=0x04001f
+:"POP STS, POP CNTR, POP PC, POP LOOP" is codec_arch_stack_mode=0 & whole24=0x04001f
 {
     dsp_pop_status_stack();
     dsp_pop_counter_stack();
@@ -2230,79 +2650,79 @@ macro resident_tail(target) {
 # Type 20 returns used by srvdsp.
 # -----------------------------------------------------------------------------
 
-:RTS is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=15
+:RTS is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=15
 {
     codec_call_return();
 }
 
-:RTS is ret19=0x5000 & rettype=0 & cond4=15
+:RTS is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=15
 {
     return [PCSTACKTOP];
 }
 
-:RTI is ret19=0x5000 & rettype=1 & cond4=15
+:RTI is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=1 & cond4=15
 {
     dsp_rti_restore_status();
     return [PCSTACKTOP];
 }
 
-:"IF EQ RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=0
+:"IF EQ RTS" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=0
 {
     if (AZF == 0) goto inst_next;
     codec_call_return();
 }
 
-:"IF EQ RTS" is ret19=0x5000 & rettype=0 & cond4=0
+:"IF EQ RTS" is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=0
 {
     if (AZF == 0) goto inst_next;
     return [PCSTACKTOP];
 }
 
-:"IF GT RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=2
+:"IF GT RTS" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=2
 {
     if (AZF != 0) goto inst_next;
     if (ANF != AVF) goto inst_next;
     codec_call_return();
 }
 
-:"IF GT RTS" is ret19=0x5000 & rettype=0 & cond4=2
+:"IF GT RTS" is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=2
 {
     if (AZF != 0) goto inst_next;
     if (ANF != AVF) goto inst_next;
     return [PCSTACKTOP];
 }
 
-:"IF LT RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=4
+:"IF LT RTS" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     codec_call_return();
 }
 
-:"IF LT RTS" is ret19=0x5000 & rettype=0 & cond4=4
+:"IF LT RTS" is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=4
 {
     if (ANF == AVF) goto inst_next;
     return [PCSTACKTOP];
 }
 
-:"IF NE RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=1
+:"IF NE RTS" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=1
 {
     if (AZF != 0) goto inst_next;
     codec_call_return();
 }
 
-:"IF NE RTS" is ret19=0x5000 & rettype=0 & cond4=1
+:"IF NE RTS" is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=1
 {
     if (AZF != 0) goto inst_next;
     return [PCSTACKTOP];
 }
 
-:"IF GE RTS" is codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=5
+:"IF GE RTS" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & ret19=0x5000 & rettype=0 & cond4=5
 {
     if (ANF != AVF) goto inst_next;
     codec_call_return();
 }
 
-:"IF GE RTS" is ret19=0x5000 & rettype=0 & cond4=5
+:"IF GE RTS" is codec_arch_stack_mode=0 & ret19=0x5000 & rettype=0 & cond4=5
 {
     if (ANF != AVF) goto inst_next;
     return [PCSTACKTOP];
@@ -2333,5 +2753,7 @@ macro resident_tail(target) {
 :NOP is whole24=0x000000
 {
 }
+
+@include "sunplus_stack_instructions.sinc"
 
 } # end generic codec loop instruction layer

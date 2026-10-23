@@ -6,6 +6,22 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus SPHE8202R DSP: reproducible local model release candidate
+
+- Package the native Ghidra 12.1.3 C-generator repairs alongside the opt-in
+  shared CALL/DO/RTI sequencer and legacy five-profile DSP language. The Docker
+  image now compiles the native decompiler from patched upstream C++ sources;
+  merely copying SLEIGH cannot reproduce accepted PCM control flow.
+- Preserve Java script proofs, a signed-width PM/DM assembler/linker SDK,
+  native unit fixtures, and a machine-checkable release manifest with exact
+  source SHA-256 and `sunplus-sphe8202r-dsp-rush26-20261023` identifier.
+- Scoped **local** acceptance: 462/462 C, 426/426 CE, 58/58 computed CE
+  targets, 28,326 stable native P-code instructions, 40,017 sequencer checks,
+  and 72,791 executed instruction steps; no source executable byte changes.
+- Publication in the canonical Analyzer and the archival HD Audio Rush source
+  repository is gated on live production Analyzer save/reopen acceptance.
+
+
 ### Headless worker supervisor controls (source candidate, not deployed)
 
 - Add MCP `set_worker_max_heap_mb` and `worker_heap_settings` for persistent per-worker JVM heap overrides from 128 to 32768 MiB, applied on supervised JVM restart. The setting is a JVM `-Xmx` ceiling, not a total-process RSS/cgroup memory limit; the existing container budget is unchanged.

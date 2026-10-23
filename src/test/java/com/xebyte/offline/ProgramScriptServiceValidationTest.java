@@ -11,7 +11,10 @@ import ghidra.framework.model.Project;
 import ghidra.framework.model.ProjectData;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.listing.Program;
+import ghidra.program.util.GhidraProgramUtilities;
+import ghidra.util.task.TaskMonitor;
 import junit.framework.TestCase;
+import org.mockito.MockedStatic;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -20,6 +23,9 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -92,6 +98,48 @@ public class ProgramScriptServiceValidationTest extends TestCase {
         assertEquals(123, data.get("function_count"));
         verify(provider).openProgramFromProject("/ap1.bin");
         verify(provider).setCurrentProgram(program);
+    }
+
+    public void testHeadlessOpenAlreadySuppressedDoesNotSaveProgram() throws Exception {
+        ProgramProvider provider = mock(ProgramProvider.class);
+        Project project = mock(Project.class);
+        Program program = mock(Program.class);
+        FunctionManager functions = mock(FunctionManager.class);
+        when(provider.getProject()).thenReturn(project);
+        when(provider.openProgramFromProject("/pcm-profile.bin")).thenReturn(program);
+        when(program.getName()).thenReturn("pcm-profile.bin");
+        when(program.getFunctionManager()).thenReturn(functions);
+        when(program.canSave()).thenReturn(true);
+
+        try (MockedStatic<GhidraProgramUtilities> flags = mockStatic(GhidraProgramUtilities.class)) {
+            flags.when(() -> GhidraProgramUtilities.shouldAskToAnalyze(program)).thenReturn(false);
+            ProgramScriptService svc = new ProgramScriptService(provider, new NoopThreadingStrategy());
+            assertTrue(svc.openProgramFromProject("/pcm-profile.bin", false) instanceof Response.Ok);
+            flags.verify(() -> GhidraProgramUtilities.markProgramNotToAskToAnalyze(program), never());
+            verify(program, never()).save(any(String.class), any(TaskMonitor.class));
+        }
+    }
+
+    public void testHeadlessOpenUnsuppressedStillMarksPromptFlagOnce() throws Exception {
+        ProgramProvider provider = mock(ProgramProvider.class);
+        Project project = mock(Project.class);
+        Program program = mock(Program.class);
+        FunctionManager functions = mock(FunctionManager.class);
+        when(provider.getProject()).thenReturn(project);
+        when(provider.openProgramFromProject("/fresh.bin")).thenReturn(program);
+        when(program.getName()).thenReturn("fresh.bin");
+        when(program.getFunctionManager()).thenReturn(functions);
+        // Offline test classpath omits some Ghidra save dependencies.
+        // Unwritable Project still proves the suppression hook executes.
+        when(program.canSave()).thenReturn(false);
+
+        try (MockedStatic<GhidraProgramUtilities> flags = mockStatic(GhidraProgramUtilities.class)) {
+            flags.when(() -> GhidraProgramUtilities.shouldAskToAnalyze(program)).thenReturn(true);
+            ProgramScriptService svc = new ProgramScriptService(provider, new NoopThreadingStrategy());
+            assertTrue(svc.openProgramFromProject("/fresh.bin", false) instanceof Response.Ok);
+            flags.verify(() -> GhidraProgramUtilities.markProgramNotToAskToAnalyze(program), times(1));
+            verify(program, never()).save(any(String.class), any(TaskMonitor.class));
+        }
     }
 
     public void testHeadlessImportDelegatesToProgramProvider() throws Exception {

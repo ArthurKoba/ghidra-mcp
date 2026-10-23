@@ -1,0 +1,32 @@
+{
+  "Ghidra": "12.1.3",
+  "compiled_sla_sha256": "e1fa22cf975c69212f96a2cff81f4d358ba8b0729bf83a51898c2cfb3e3f28df",
+  "files_sha256": {
+    "patches/ghidra-12.1.3/native-explicit-selfloop-c.patch": "92fe54293915b97e3a785691ec07948edf4ccc85642934578a705666b0f56211",
+    "patches/ghidra-12.1.3/native-unresolved-branchind-c.patch": "909a7fcb88acd7880af2fbe0c0705104bccc51a731f062de4e22181fe94ed9a5",
+    "patches/ghidra-12.1.3/native-word-addressed-ptradd-guard.patch": "20715c85113d8bc79f00759ad34db22f574b010431221e5ad75e30967918d829",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.cspec": "ee6cadf87147ec6dd6ccf13ef20a24d3ac9c0537795cc821077140ca56447311",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.ldefs": "20bccd2874ab3f4ae062aa097312a0e89e194e5666d27e83dda3d34a6d5ed37f",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.pspec": "fb9399c713a7f7b440fe32b2cea86cb93724199fe153a24b203f17f6835ef704",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.slaspec": "7944b22ebfef64bd904ec8973b3c14a16683a31cd5c05d72fa5d9c45e697a3f2",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_stack_instructions.sinc": "7a6cea1c72823f3837b7f2b41a8e9c2652071f49dd3157ab7fe26338ec218e13",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_stack_runtime.sinc": "25954314e1586515ac8ef01bc7252c48068f6332897af46fdf92065893cf76e8"
+  },
+  "gate": "Do not mark canonical or duplicate into HD Audio Rush until Analyzer MCP production readback accepts the installed native/SLEIGH model and saved firmware programs.",
+  "language_definition_version": "0.1",
+  "language_id": "SunplusSPHEAudioDSP:BE:16:default",
+  "release": "sunplus-sphe8202r-dsp-rush26-20261023",
+  "reproducible_local": {
+    "CE_indirect_proven": 58,
+    "CE_native": 426,
+    "C_failed": 0,
+    "C_warning_lines": 0,
+    "decoded_native": 28326,
+    "native_C": 462,
+    "normalized_pcode_mismatches": 0,
+    "stack_checks": 40017,
+    "stack_instruction_executions": 72791
+  },
+  "schema": "sunplus-dsp-model-release-1",
+  "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING"
+}

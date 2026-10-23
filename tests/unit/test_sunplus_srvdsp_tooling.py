@@ -131,8 +131,8 @@ def test_codec_nested_ce_count_and_loop_stack_regressions() -> None:
     assert "DSP_LOOP_START_SHADOW3 = DSP_LOOP_START" in text
     assert "DSP_LOOP_START = DSP_LOOP_START_SHADOW3" in text
     assert "CNTR = DSP_COUNT0" in text and "CNTR = DSP_COUNT3" in text
-    assert ':LDI CNTR, data14 is srvdsp_wrapper_mode=0' in text
-    assert ':DMREAD CNTR, addr14 is srvdsp_wrapper_mode=0' in text
+    assert ':LDI CNTR, data14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0' in text
+    assert ':DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0' in text
     fixture_dir = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp"
     assert (fixture_dir / "nested_ce_2x3.bin").stat().st_size == 30
     assert (fixture_dir / "nested_ce_4deep.bin").stat().st_size == 57
@@ -156,9 +156,9 @@ def test_codec_nested_ce_native_interprocedural_calls() -> None:
     assert "codec_call_return()" in text
     assert "codec_ce_nested_mode=1 & type10=3 & call18=1" in text
     for form in ("IF EQ CALL", "IF NE CALL", "IF GT CALL", "IF LT CALL"):
-        assert f':"{form}" JumpAddr is codec_ce_nested_mode=1' in text
+        assert f':"{form}" JumpAddr is codec_arch_stack_mode=0 & codec_ce_nested_mode=1' in text
     for form in ("IF EQ RTS", "IF NE RTS", "IF GT RTS", "IF GE RTS", "IF LT RTS"):
-        assert f':"{form}" is codec_ce_nested_mode=1' in text
+        assert f':"{form}" is codec_arch_stack_mode=0 & codec_ce_nested_mode=1' in text
     root = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp"
     assert (root / "nested_ce_call_2x3.bin").stat().st_size == 39
     assert (root / "nested_ce_call_2stage.bin").stat().st_size == 51
@@ -307,7 +307,7 @@ def test_codec_profile_extension_covers_observed_misc_and_multifunction_forms() 
     for marker in (
         ':"IF LT RTS"',
         ':"IF GT RTS"',
-        ':DIS_G_MODE is whole24=0x0c0080',
+        ':DIS_BIT_REV is whole24=0x0c0080',
         ':DIS_TIMER is whole24=0x0c8000',
         ':DIS_M_MODE is whole24=0x0c2000',
         ':ENA_AR_SAT is whole24=0x0c0c00',
@@ -315,7 +315,7 @@ def test_codec_profile_extension_covers_observed_misc_and_multifunction_forms() 
         ':ENA_M_MODE is whole24=0x0c3000',
         ':ENA_TIMER is whole24=0x0cc000',
         ':"MODIFY(" ModI "," ModM ")"',
-        ':"POP STS, POP CNTR, POP PC, POP LOOP" is whole24=0x04001f',
+        ':"POP STS, POP CNTR, POP PC, POP LOOP" is codec_arch_stack_mode=0 & whole24=0x04001f',
         ':SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" DReg',
         ':SR "=" "LSHIFT" ShiftX "(LO)"',
         ':SR "=" "SR OR LSHIFT" ShiftX "(LO)"',
@@ -372,18 +372,20 @@ def test_pm24_dynamic_accesses_use_lossless_width_callother_interfaces() -> None
     assert "an emulator that executes these userops must provide a backing" in text
 
     acceptance = (ROOT / "ghidra_scripts" /
-        "SunplusCodecFullCAcceptance.java").read_text()
+        "SunplusDSPFullCorpusAcceptance.java").read_text()
+    # Current, canonical DSP function inventory, not a historical bootstrap sample.
     for module, count in (
         ("srvdsp.bin", 9),
         ("aux-profile.bin", 61),
-        ("pcm-profile.bin", 4),
-        ("ac3-profile.bin", 25),
-        ("dts-profile.bin", 98),
+        ("pcm-profile.bin", 115),
+        ("ac3-profile.bin", 37),
+        ("dts-profile.bin", 100),
     ):
-        assert f'"{module}", {count}' in acceptance
-    assert "SUNPLUS_CODEC_FULL_C_ACCEPTANCE=PASS" in acceptance
+        assert f'"{module}",{count}' in acceptance
+    assert "FULL_CORPUS_ACCEPTANCE=PASS" in acceptance
     assert "decompileCompleted()" in acceptance
     assert "currentProgram.getFunctionManager().getFunctionCount()" in acceptance
+    assert "ce_missing" in acceptance
 
 
 def test_codec_sequential_ce_with_static_direct_backedges() -> None:
@@ -405,3 +407,219 @@ def test_codec_sequential_ce_with_static_direct_backedges() -> None:
     workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
     assert "Verify Sunplus sequential CE loops across resident call" in workflow
     assert "SunplusPcmSequentialCeLoopAcceptance.java" in workflow
+
+
+def test_nested_codec_ce_outer_direct_backedge_keeps_counter_stack_ownership() -> None:
+    """Direct outer CFG is required for real nested/CALL loops, without
+    restoring CNTR from the nonnested loop's stale shadow register.
+    """
+    text = SLASPEC.read_text()
+    normal = (
+        ':^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & '
+        'codec_ce_direct_backedge=1 & codec_ce_nested_mode=0'
+    )
+    outer = (
+        ':^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & '
+        'codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & '
+        'codec_ce_static_depth=1'
+    )
+    assert normal in text
+    assert outer in text
+    body = text.split(outer, 1)[1].split('}', 1)[0]
+    assert 'goto codecDirectLoopStart;' in body
+    assert 'CNTR = CNTR - 1;' in body
+    assert 'CNTR = DSP_LOOP_COUNT_SHADOW;' not in body
+    assert 'DSP_LOOP_START = DSP_LOOP_START_SHADOW;' not in body
+    # The inner counter-load/end region owns counter save and restore.
+    assert 'DSP_STATIC_CNTR_OUTER = CNTR;' in text
+    assert 'CNTR = DSP_STATIC_CNTR_OUTER;' in text
+
+
+def test_nested_codec_ce_inner_direct_backedge_restores_counter() -> None:
+    """Depth-two direct CFG still restores the hardware-saved outer CNTR."""
+    text = SLASPEC.read_text()
+    signature = (
+        ':^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & '
+        'codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & '
+        'codec_ce_static_depth=2'
+    )
+    assert text.count(signature) == 1
+    body = text.split(signature, 1)[1].split('}', 1)[0]
+    assert 'build instruction;' in body
+    assert 'CNTR = CNTR - 1;' in body
+    assert 'goto codecDirectLoopStart;' in body
+    assert '<codec_ce_nested_inner_direct_done>' in body
+    assert 'CNTR = DSP_STATIC_CNTR_OUTER;' in body
+    assert body.index('goto codecDirectLoopStart;') < body.index('CNTR = DSP_STATIC_CNTR_OUTER;')
+    assert 'CNTR = DSP_LOOP_COUNT_SHADOW;' not in body
+    assert 'DSP_STATIC_CNTR_OUTER = CNTR;' in text
+
+
+def test_nested_direct_inner_ce_has_native_runtime_2x3_coverage() -> None:
+    native = ROOT / "ghidra_scripts/SunplusNestedDirectCeAcceptance.java"
+    script = native.read_text()
+    assert "ADSP_DIRECT2_EMU inner=" in script
+    assert "inner==6&&outer==2" in script
+    assert "DSP_STATIC_CNTR_OUTER" in script
+    assert "SUNPLUS_NESTED_DIRECT_CE_RUNTIME_ACCEPTANCE=PASS" in script
+    workflow = (ROOT / ".github/workflows/tests.yml").read_text(encoding="utf-8")
+    assert "Verify Sunplus nested direct-inner CE stack restoration" in workflow
+    assert "SunplusNestedDirectCeAcceptance.java" in workflow
+    offline = (ROOT / "tools/validation/sunplus_processor_fixtures_local.sh").read_text()
+    assert "run_fixture direct2 nested_ce_2x3 0x100 SunplusNestedDirectCeAcceptance.java" in offline
+
+
+def test_ac3_pm0506_direct_ce_high_level_while_form_is_scoped() -> None:
+    """Native PM:0526→PM:055A is a guarded while, not a do-loop in Ghidra C."""
+    script = (ROOT / "ghidra_scripts/SunplusCodecCeBatchRecode.java").read_text()
+    assert 'entry.getKey().equals("PM:0506")' in script
+    assert 'a.start==0x0526' in script or 'candidates.get(0).start==0x0526' in script
+    assert 'candidates.get(0).end==0x055a' in script
+    assert 'whileAfter==whileBefore+1' in script
+    assert 'after.contains("sVar6 = sVar6 + -1;")' in script
+    assert 'after.contains("if (sVar6 == 0)")' in script
+    assert 'CE_BATCH_PM0506_STRUCTURED_WHILE_ACCEPTANCE=PASS' in script
+    assert 'if(!structured&&dos(after)<dos(before)+candidates.size())' in script
+
+
+def test_dts_restored_native_call_flow_and_hidden_loop_census_acceptance() -> None:
+    """Exact local DTS checkpoint tests return flows, hidden code, and owned CE."""
+    source = (ROOT / "ghidra_scripts/SunplusDtsRestoredFlowAcceptance.java").read_text()
+    for marker in (
+        "class SunplusDtsRestoredFlowAcceptance",
+        "functionCount==102||functionCount==103",
+        "callee.hasNoReturn()",
+        "FlowOverride.NONE",
+        "decoder.getBody().getMaxAddress()",
+        "ownerDo==12",
+        "PcodeOp.CBRANCH",
+        "SUNPLUS_DTS_EXTRA_CALL_OWNER_ACCEPTANCE=PASS",
+        "callers.equals(Set.of",
+        "pm(0x06bf)",
+        "SUNPLUS_DTS_RESTORED_FLOW_ACCEPTANCE=PASS",
+    ):
+        assert marker in source
+
+
+def test_all_observed_combined_pm24_forms_preserve_full_width_userop_contract() -> None:
+    """Regression: the Type-3/Type-5 and MAC PM forms must use the same
+    2-byte word address / 3-byte value interface as the pure Type-5 form.
+    This is decompiler/static IR acceptance, *not* emulation side-effect proof.
+    """
+    text = SLASPEC.read_text()
+    # Constructor exports of code addresses (PM:2) are not dynamic PM data.
+    assert text.count("local pw:3=dsp_pm_load24(pa);") == 8
+    assert text.count("local word:3=dsp_pm_load24(a);") == 14
+    assert text.count("dsp_pm_store24(a,word);") == 5  # pure Type-5 + 4 MAC/ALU variants
+    assert "*[PM]:3" not in "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "local a:2" in text and "local pa:2" in text
+    assert "local word:3" in text and "local pw:3" in text
+    assert "word[8,16]" in text and "pw[8,16]" in text
+    assert "zext(word[0,8])" in text and "zext(pw[0,8])" in text
+
+
+def test_pm24_emulator_userops_have_concrete_3byte_memory_and_aliasing_proof() -> None:
+    """The explicit emulator library must implement real PM state, not silently
+    equate opaque CALL_OTHER decompiler representations with native execution.
+    """
+    script = (ROOT / "ghidra_scripts" /
+              "SunplusPm24UseropExecutionAcceptance.java").read_text()
+    for marker in (
+        "extends AnnotatedPcodeUseropLibrary<byte[]>",
+        "public byte[] dsp_pm_load24(",
+        "public void dsp_pm_store24(",
+        "@PcodeUserop(hasSideEffects=true)",
+        "getVar(pm,wordOffset(wordAddr),3,true",
+        "setVar(pm,wordOffset(wordAddr),3,true,word)",
+        "pm.getAddressableUnitSize()==3",
+        "Arrays.equals(copied,original)",
+        "Arrays.equals(aliased,overwritten)",
+        "SUNPLUS_PM24_USEROP_EXECUTION_ACCEPTANCE=PASS",
+    ):
+        assert marker in script
+
+
+def test_nested_type17_cntr_register_move_saves_outer_counter_frame() -> None:
+    """Native AC3 Type17 `CNTR = AR` during a nested DO must preserve
+    the outer CE counter. The constructor is opt-in at proven depth 2.
+    """
+    text = SLASPEC.read_text()
+    special = (
+        ':"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & '
+        'codec_ce_static_depth=2 & type17=0x0d0 & '
+        'dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc'
+    )
+    assert special in text
+    body = text.split(special, 1)[1].split("}", 1)[0]
+    assert "DSP_STATIC_CNTR_OUTER = CNTR;" in body
+    assert "IntDst = IntSrc;" in body
+    assert ':"" IntDst "=" IntSrc is type17=0x0d0 & IntDst & IntSrc' in text
+    assert "CNTR = DSP_STATIC_CNTR_OUTER;" in text
+
+
+def test_full_dsp_corpus_runner_requires_explicit_checkpoint_denominators() -> None:
+    """Reopened GZF inventory may expand; reject silent stale 9/61/115/37/100."""
+    source = (ROOT / "tools/validation/sunplus_dsp_corpus_local.sh").read_text()
+    acceptance = (ROOT / "ghidra_scripts/SunplusDSPFullCorpusAcceptance.java").read_text()
+    assert "SUNPLUS_FUNCTION_COUNTS:=9,61,115,37,100" in source
+    assert 'if [[ "${#counts[@]}" -ne 5 ]]' in source
+    assert 'if [[ ! "$value" =~ ^[1-9][0-9]*$ ]]' in source
+    assert 'count="${counts[$index]}"' in source
+    assert '"$SUNPLUS_CORPUS_OUT/c" "$count"' in source
+    assert "Integer.parseInt(args[2])" in acceptance
+    assert "count!=expected" in acceptance
+
+
+
+def test_full_dsp_corpus_rejects_internal_only_cbranch_and_any_warning_in_strict() -> None:
+    """An internal sign/shift CBRANCH is not proof of a native DSP loop backedge."""
+    source = (ROOT / "ghidra_scripts/SunplusDSPFullCorpusAcceptance.java").read_text()
+    assert "int externalBackedgeShape=0,internalConditionalOnly=0" in source
+    assert 'if("PM".equals(op.getInput(0).getAddress().getAddressSpace().getName())){' in source
+    assert 'externalCb++;' in source and 'branchPm++;' in source
+    assert 'matchedDirect++' in source
+    assert 'wrongDirectTarget!=0' in source
+    assert 'boolean externalShape=externalCb>0||(cb>0&&(branchPm>0||ind>0));' in source
+    assert "ce_external_backedge_shape=" in source
+    assert "ce_internal_conditional_only=" in source
+    assert "externalBackedgeShape!=ceCount" in source
+    assert "symbolOverlapFunctions!=0" in source
+
+
+def test_rush24_dts_exact_dm_word_width_evidence_is_scoped_and_reproducible() -> None:
+    """The 91 DTS alias warnings arise from a finite native-proven
+    16-bit DM word inventory, not a whole-space RAM model.
+    """
+    from hashlib import sha256
+
+    fixture = ROOT / "tests/fixtures/sunplus_sphe_audio_dsp/dts_dm16_evidence_20261014.txt"
+    raw = fixture.read_bytes()
+    assert sha256(raw).hexdigest() == "9cc8e6a1fd7838773c170d9225cd02d7b95e67d18e5fd4027fce8b29fab27643"
+    lines = raw.decode("ascii").splitlines()
+    words = [int(line, 16) for line in lines]
+    assert len(words) == len(set(words)) == 317
+    assert words == sorted(words)
+    assert all(len(line) == 4 for line in lines)
+    assert 1 + sum(b != a + 1 for a, b in zip(words, words[1:])) == 76
+
+    script = (ROOT / "ghidra_scripts/SunplusDtsDmWordWidthRestore.java").read_text()
+    assert "Undefined2DataType.dataType" in script
+    assert "SourceType.DEFAULT" in script
+    assert "createUninitializedBlock" in script
+    assert "R24_DM317_GUARDED_REPAIR=PASS" in script
+    assert "R24_DM_SOURCEPROVEN_" in script
+    assert "nativeBodies()" in script
+    assert "initializedSha()" in script
+    assert "317" in script and "76" in script
+
+    native = (ROOT / "patches/ghidra-12.1.3/native-word-addressed-ptradd-guard.patch").read_text()
+    assert "ct->getMetatype() == TYPE_PTR" in native
+    assert "tp->getWordSize()" in native
+    assert "tp->getPtrTo()->getAlignSize()" in native
+    assert "elementBytes % unitBytes != 0" in native
+    language = SLASPEC.read_text()
+    assert "codec_se_proven_nonnegative=(25,25) noflow" in language
+    assert ':"MR = MX0 * 0 (SS)," DReg4 "=" "DM(" DagI "," DagM ")"' in language
+    assert ':"MR = MX0 * 0 (SS)," "DM(" DagI "," DagM ")" "=" DReg4' in language

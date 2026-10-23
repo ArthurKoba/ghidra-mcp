@@ -1,0 +1,54 @@
+--- a/as21/as21-grammar.y
++++ b/as21/as21-grammar.y
+@@ -230,6 +230,7 @@
+ %token CODE DATA LENGTH CIRC INIT24 ADDRESS PAGE
+ 
+ %token CARRY AND OR NOT XOR PASS NONE ABS RTS RTI OF TSTBIT SETBIT
++%token INC_CONST DEC_CONST
+ %token CLRBIT TGLBIT DIVS DIVQ IF JUMP CALL DO UNTIL
+ %token SET RESET TOGGLE IDLE MODIFY NOP ENA DIS
+ %token PUSH POP STS CNTR PC LOOP PM DM IO
+@@ -1540,6 +1541,25 @@
+                 symbol_add_relocation( $2.symbol, $2.addend,
+                                        ($2.type & SYMBOL_MASK) | R_ADSP218X_YYCCBO_BITNO );
+             }
++        }
++    /* SDK extension: retain the selected ALU operation for a constant Y.
++       PASS folds (2+1) to 4-1, losing the original AMF encoding. These explicit
++       forms use existing checked constant coding and never accept raw words. */
++    | INC_CONST '(' constant_expression ')'
++        {
++            unsigned long yyccbo = check_yyccbo($3);
++            restrict_instruction(EF_ADSP218X | EF_ADSP217X);
++            $$ = 0x11 << AMF_OFFSET;
++            if (yyccbo == 0) yyerror("Invalid INC_CONST operand");
++            else $$ |= yyccbo;
++        }
++    | DEC_CONST '(' constant_expression ')'
++        {
++            unsigned long yyccbo = check_yyccbo($3);
++            restrict_instruction(EF_ADSP218X | EF_ADSP217X);
++            $$ = 0x18 << AMF_OFFSET;
++            if (yyccbo == 0) yyerror("Invalid DEC_CONST operand");
++            else $$ |= yyccbo;
+         }
+     | PASS alu_xop
+         {
+--- a/as21/keytable8x.c
++++ b/as21/keytable8x.c
+@@ -55,6 +55,7 @@
+     { "CNTR",       CNTR },
+     { "CODE",       CODE },
+     { "DATA",       DATA },
++    { "DEC_CONST",  DEC_CONST },
+     { "DIS",        DIS },
+     { "DIVQ",       DIVQ },
+     { "DIVS",       DIVS },
+@@ -92,6 +93,7 @@
+     { "IF",         IF },
+     { "IFC",        IFC },
+     { "IMASK",      IMASK },
++    { "INC_CONST",  INC_CONST },
+     { "INIT24",     INIT24 },
+     { "INTS",       INTS },
+     { "IO",         IO },

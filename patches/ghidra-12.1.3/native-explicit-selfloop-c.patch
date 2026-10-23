@@ -1,0 +1,22 @@
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc
+@@ -3523,7 +3523,18 @@
+       if ((bb->sizeOut()==1)&&(bb->getOut(0)==bb)) { // Infinite loop
+ 	if (!bb->isDonothingLoop()) {
+ 	  bb->setDonothingLoop();
+-	  data.warning("Do nothing block with infinite loop",bb->getStart());
++	  // A direct unconditional native JUMP back to its own instruction
++	  // is a complete, deliberate control-flow statement.  The C
++	  // printer already emits the corresponding `do {} while (true)`.
++	  // Reserve the diagnostic for loops with a synthetic/missing
++	  // native backedge, rather than reporting valid firmware as bad C.
++	  const PcodeOp *backedge = bb->lastOp();
++	  const bool explicitSelfJump =
++	    (backedge != (const PcodeOp *)0) &&
++	    (backedge->code() == CPUI_BRANCH) &&
++	    (backedge->getAddr() == bb->getStart());
++	  if (!explicitSelfJump)
++	    data.warning("Do nothing block with infinite loop",bb->getStart());
+ 	}
+       }
+       else if (bb->unblockedMulti(0)) {

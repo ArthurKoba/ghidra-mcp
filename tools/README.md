@@ -11,6 +11,37 @@ tools/
 └── (CLI utilities live in fun-doc/ now — see below)
 ```
 
+## Sunplus DSP SDK candidate
+
+[`sunplus_sdk/`](sunplus_sdk/README.md) provides a local assembly/link SDK,
+Python API, strict ELF validation and documentation for the associated Ghidra
+PM24/DM16 loader. Run `python -m tools.sunplus_sdk --help` for its public CLI.
+`validation/build_sunplus_sdk.py` packages pinned tool sources and a separate
+Ghidra 12.1.3 candidate; `validation/sunplus_adsp_roundtrip.py` compares existing
+Analyzer instruction listings with the reference assemblers or SDK dialect.
+These build utilities do not connect to or mutate an Analyzer project.
+
+The SDK is an assembly toolchain candidate, not a C compiler, flash writer or
+accepted Sunplus hardware model. Build/container tests and instruction-byte
+matches do not establish complete P-code or saved-program semantic coverage.
+
+## Local DSP diagnostic accounting
+
+`validation/sunplus_warning_audit.py` compares two saved, complete Analyzer C
+exports without connecting to Ghidra. It independently counts **warning-owning
+functions** and **individual diagnostic occurrences**, checks every C file
+against its `index.psv`, and rejects newly introduced warning occurrences even
+if another warning disappeared or the total line count stayed constant.
+
+Run with `--before label=/path/to/C/export --after label=/path/to/C/export`.
+The command returns a nonzero status for newly introduced diagnostics, and
+`--output` saves an auditable JSON delta. Do not compare different native
+function denominators. A repeated message in one function counts as multiple
+lines but only one warning-owning function.
+
+This audit measures decompiler diagnostics, not Sunplus hardware correctness.
+It does not suppress messages or modify local or canonical Analyzer projects.
+
 ## Looking for the function-documentation CLI?
 
 Three older scripts (`scan_undocumented_functions.py`,
@@ -61,5 +92,5 @@ of those three existing locations.
 
 ---
 
-All tools connect to Ghidra MCP Server via HTTP (default:
+Analyzer-facing tools connect to Ghidra MCP Server via HTTP (default:
 `http://127.0.0.1:8089`).

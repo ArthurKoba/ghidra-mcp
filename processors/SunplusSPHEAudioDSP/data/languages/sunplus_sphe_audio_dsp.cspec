@@ -21,4 +21,18 @@
       </unaffected>
     </prototype>
   </default_proto>
+  <!-- Experimental, opt-in only for native-proof-safe callees. Do NOT mark
+       general DSP calls as preserving loop state; other functions contain DO. -->
+  <prototype name="__sunplus_loop_safe" extrapop="0" stackshift="0">
+    <input/>
+    <output/>
+    <unaffected>
+      <register name="PC"/>
+      <register name="SP"/>
+      <register name="DSP_LOOP_START"/>
+      <register name="DSP_LOOP_START_SHADOW"/>
+      <register name="DSP_LOOP_COUNT_SHADOW"/>
+    </unaffected>
+  </prototype>
+
 </compiler_spec>

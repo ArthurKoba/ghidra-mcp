@@ -9,6 +9,50 @@ Sunplus target rather than claiming complete ADSP-218x compatibility: the
 Sunplus integration and data-memory behavior still contain target-specific
 unknowns.
 
+## Opt-in native software sequencer: shared stack and RTI (local acceptance)
+
+`sunplus_stack_runtime.sinc` and `sunplus_stack_instructions.sinc` implement
+`codec_arch_stack_mode=1` as a separate, executable SLEIGH view. The accepted
+legacy C-analysis view (`codec_arch_stack_mode=0`) remains unchanged.
+The software sequencer implements a shared **16-entry PC stack** for `CALL`,
+`RTS` and `DO`, four nested-loop frames, four preserved counter frames,
+12 status frames, `RTI` return/status restoration, ASTAT flags, MSTAT
+secondary register banks, condition-code selection, delayed TOPPCSTACK pop,
+and explicit faults for invalid stack state. No firmware PM or DM bytes are
+rewritten; the additional `DSPSTACK` space stores analysis-time sequencer state.
+
+The saved local `SunplusArchitecturalStackAcceptance.java` readback passed
+**40,017 checks**, **72,791 real-instruction P-code executions**, and nine
+specific fault controls. The composed SLEIGH language compiled reproducibly;
+all five saved firmware profiles retained **462/462 Analyzer C, 426/426 CE,
+zero C warnings**, with **28,326/28,326 freshly decoded instructions**
+matching saved text and normalized P-code. All C files kept identical content.
+The isolated Ghidra worker exited cleanly after save/reopen. The machine
+execution checks use an explicit local fault userop implementation and do
+not claim asynchronous interrupt scheduling, complete hardware equivalence,
+or readiness to migrate to the canonical Analyzer. The opt-in mode has been
+verified as a reusable software instruction model, not silently enabled for
+existing firmware.
+
+## I/M/L circular-address candidate (RUSH 25 local acceptance)
+
+The SLEIGH source now routes **all 86 index post-updates** through one shared
+signed-14-bit `M` / zero-disabled `L` modulo computation, selecting the matching
+`L0..L7` by the **I register**, not the M register. The linear `L=0` path
+retains the previous full 16-bit index arithmetic. Indirect DAG1 memory access
+still applies the separate conditional 14-bit bit-reversal on the *current*
+index, not on its post-update; DAG2 does not reverse the address. PM24 and
+DM16 remain distinct. Documented modulo preconditions require a valid index
+inside its inferred circular window and modifier magnitude smaller than the
+window; invalid/out-of-range states and silicon timing are **UNKNOWN**.
+
+Local Ghidra 12.1.3 acceptance: 13/13 EmulatorHelper cases, 7/7 synthetic C,
+then 460/460 saved native functions across five isolated codec/wrapper projects,
+with save/close/reopen/readback. C warning owners stayed at 42 (AC-3 22,
+PCM 12, AUX 8, DTS and wrapper 0). This is static/P-code acceptance, not
+complete processor or target-board behavior. The canonical Analysis project
+was not modified.
+
 ## Current scope
 
 The module has moved beyond the original decode-smoke stage. Its validated scope now includes the complete local instruction corpus used by the canonical SPHE8202R `srvdsp.bin` wrapper plus every instruction word reached by vector-seeded native control flow in the extracted AUX, PCM, AC-3 and DTS codec profiles used for this target. This is reachable-code coverage, not a claim that every 24-bit word in each profile is executable code or that the entire ADSP-218x ISA is implemented.
@@ -82,9 +126,12 @@ headless Ghidra without MCP, and persists after mapping the missing DM region.
 Target-byte ablations establish that removing dynamic PM reads or DM/PM writes
 breaks the timeout. Using 16-bit PM loads/stores also unblocks all five, but
 **silently drops eight bits and is not a valid DSP model**. The model therefore
-keeps PM as a 24-bit word-addressed space and represents the *pure Type-5*
-program-memory data accesses with explicit `dsp_pm_load24(address)` and
-`dsp_pm_store24(address,word)` p-code userops. The word address remains
+keeps PM as a 24-bit word-addressed space. The initial 2026-10-09 fix
+represented *pure Type-5* program-memory accesses with
+`dsp_pm_load24(address)` and `dsp_pm_store24(address,word)` p-code userops.
+The 2026-10-13 local follow-up extended the same width-preserving interface
+to the remaining Type-3 / combined Type-5 ALU/MAC/PM forms: eight combined
+PM reads, fourteen additional PM reads and four additional PM stores. The word address remains
 16-bit; the read result and write value are full 24-bit words. `DReg4` receives
 bits 23..8 and `PX` receives bits 7..0, unchanged from the original encoding.
 These operations remain visible in generated C instead of producing a
@@ -93,10 +140,12 @@ truncated or invented C translation.
 **Local Ghidra 12.1.3 verification** (isolated SDK/project, not production):
 SLEIGH compiles; P-code inspection verified 3-byte read/output and write/input
 with 2-byte word addresses. From the saved canonical function-entry inventory,
-C generation passed DTS 98/98, AUX 61/61, PCM 4/4 and AC-3 25/25; the existing
-`srvdsp` acceptance passed 117/117 code words and 9/9 C functions. The new
-`ghidra_scripts/SunplusCodecFullCAcceptance.java` provides a repeatable
-post-import regression for already-analyzed programs.
+the historical partial-function sample yielded DTS 98/98, AUX 61/61,
+PCM 4/4 and AC-3 25/25; srvdsp passed 117/117 code words and 9/9 C.
+These historical sample counts are **not** the complete saved corpus.
+`ghidra_scripts/SunplusDSPFullCorpusAcceptance.java` supersedes the removed
+partial-corpus acceptance and audits the exact saved function inventory,
+CE P-code backedges, CFG ownership, C output and semantic warnings.
 
 **Validation boundary:** `CALL_OTHER` is an *opaque representation* for the
 native Ghidra decompiler. Its declared arguments and values preserve the full
@@ -108,6 +157,85 @@ the existing canonical Analysis project must refresh saved instruction P-code
 under a deployed language model before its old C views can be counted as
 repaired. This is local static-C validation, not deployed/runtime/hardware
 acceptance or full DSP-algorithm recovery.
+
+## Full 24-bit PM access audit — isolated local candidate, 2026-10-13
+
+The earlier Type-5-only userop mapping left twenty-six direct 24-bit
+program-memory accesses in combined DSP instruction constructors. Two
+fully decoded AUX functions (`PM:1306` and `PM:1400`) acquired the correct
+native CE `CBRANCH` but the Ghidra 12.1.3 full-C optimizer timed out.
+Replacing only eight combined PM reads did **not** eliminate the timeout.
+An isolated build using the same 16-bit PM word address and full 24-bit
+`dsp_pm_load24`/`dsp_pm_store24` interface for all twenty-six remaining
+accesses completed both cases. Recovered AUX CE coverage on the preserved,
+independently reopened local GZF progressed to **55/55**, with **68/68**
+identified AUX functions decompiling successfully. The 68-function inventory
+includes two new *provisional* entries backed by structural control-flow
+and/or direct CALL evidence; it must not be treated as proof of complete
+reachability or algorithm recovery.
+
+**Local userop execution proof:** `ghidra_scripts/SunplusPm24UseropExecutionAcceptance.java`
+implements a concrete `AnnotatedPcodeUseropLibrary<byte[]>` for an isolated
+`PcodeEmulator`. Its native Ghidra 12.1.3 regression executed two 24-bit PM
+reads and three 24-bit PM writes, confirmed 3-byte word-addressing and verified
+read-after-write aliasing. This library is **not automatically registered for
+production Analysis emulators**; users must explicitly supply the library to
+a Ghidra P-code emulator. The static decompiler userop call cannot implement
+backing PM by itself.
+
+**Nested Type17 counter move:** the 2026-10-13 isolated native AC-3
+`PM:0B7A` regression validated an opt-in depth-2 `CNTR = AR` Type17
+constructor: it saves the outer counter in `DSP_STATIC_CNTR_OUTER` before the
+inner loop, allowing the inner CE end to restore it. This recovered two native
+CE backedges and two additional C loops without new warnings, confirmed by
+reopening the saved local GZF. AC-3 `PM:041E` recovered its standalone
+CE at `PM:0422/0423`; its *two nested* CE loops remain unresolved in C,
+and must not be counted as accepted. Neither experiment proves every nested
+pattern or physical DSP execution equivalence.
+
+**Nested inner direct CE (local proof):** a separately opted-in
+`codec_ce_static_depth=2` direct CE constructor now provides a statically
+verified backedge for the inner `DO`, restores `DSP_STATIC_CNTR_OUTER` only
+when the inner count expires, and requires the native Type17 `CNTR = AR`
+constructor to save the outer count first. The isolated AC-3 `PM:1051`
+experiment restored its two nested pairs (4 new C loops; 17→21, 30 warnings
+unchanged). A separate read-only reopen of the saved 160-function AC-3 GZF
+reported CE 150/166→154/166, C 160/160, no new decompiler warning functions;
+both native counter-move sites emitted the extra saved-counter P-code copy.
+A separate synthetic 2×3 nested CE `PcodeEmulator` test for the new direct
+inner backedge observed 6 inner iterations, 2 outer iterations and final
+`CNTR=0`; the established eleven native fixture regressions remain intact.
+This proves local static P-code/C consistency and a bounded synthetic
+runtime case, not complete hardware PC/LOOP stack equivalence. `PM:041E` still does not gain its two nested C loops under
+the same direct-inner setting; this is an unresolved CFG/C contradiction and
+must not be counted as recovered.
+
+**DTS native return/CE frontier (local):** in an independently reopened
+isolated DTS GZF, two previously `no-return`-marked routines `PM:06A9` and
+`PM:06C1` contain native `RTS`. Restoring those return contracts and four
+forced `CALL_RETURN` flow overrides exposed 175 DSP instructions in
+`PM:03D7..048D`, including **12 additional native `DO UNTIL CE`** instructions
+that were not counted in the previous decoded corpus. A separate provisional
+RTS-bounded function at `PM:1364..1394` owns the `PM:1368` loop. DTS now has
+**103/103** C-decompilable identified functions and **72/76** native CE ends
+with conditional P-code after saved GZF reopen. The previous 63-CE DTS
+inventory is superseded by this expanded 76-CE corpus, not a reduction of
+remaining native loops. `ghidra_scripts/SunplusDtsRestoredFlowAcceptance.java`
+checks the saved caller/callee contracts, expanded native code and owned CE.
+All 76 native CE ends now belong to identified functions; the additional
+function `PM:06B5..06C0` was recovered from three native `CALL` sites
+`PM:043C/0443/044A`, with verified terminal `RTS` and existing CE P-code.
+Four CE ends remain unresolved in DTS, including two heavy functions whose
+modified C-decompilation timed out and two paths that introduced unreachable
+block warnings. No canonical Analysis migration or board-level execution proof.
+
+**Acceptance separation:** this confirms static Ghidra P-code/C recovery,
+not emulator execution equivalence for emulators without that library. `CALLOTHER` PM userops do not themselves
+read/write backing PM or implement read-after-write aliasing; a verified
+emulator/userop library is still required. The original GZF code bytes were
+preserved and production Analysis and the canonical project were not changed.
+Full processor acceptance additionally requires the native fixture suite,
+full five-program GZF C/CFG regression and this userop execution contract.
 
 ## Validation boundary
 
@@ -210,3 +338,55 @@ context before decoding its CE end. For previously analyzed programs, use a
 scoped transaction to clear and re-disassemble only the verified instructions;
 preserve functions, comments, bytes and non-synthetic references. An existing
 saved program does not automatically acquire new P-code after SLEIGH changes.
+
+
+## Local DTS strict C/CE checkpoint — 2026-10-14
+
+This checkpoint is a saved, independently reopened **isolated Ghidra GZF**.
+It is not a deployment to production Analysis or silicon-equivalent emulation.
+The final target has 103/103 decompiled functions, 76/76 native DO/CE ends
+with identifiable external P-code branches, 0 semantic warnings and 0
+global-symbol-overlap warnings under strict Ghidra corpus acceptance.
+Initialized native source bytes, function identity/bounds and existing
+automatically generated DM labels are unchanged. The CE count is an
+external-branch-shape metric, not proof of all loop-stack or device timing.
+
+The native Ghidra 12.1.3 decompiler's Funcdata::mapGlobals was instrumented:
+625 conflict events in 91 DTS functions all required 2-byte DM words while
+existing default DAT_DM symbols had a 1-byte size. There were 317 unique
+native-referenced DM word addresses in 76 exactly contiguous runs.
+The guarded, one-time, isolated
+ghidra_scripts/SunplusDtsDmWordWidthRestore.java migration consumes
+tests/fixtures/sunplus_sphe_audio_dsp/dts_dm16_evidence_20261014.txt
+and validates the manifest checksum, 103-function inventory, 16-bit DM
+address units, PM source byte hash, existing default symbol names, function
+bodies and representative C loops. It creates only uninitialized 2-byte
+DM words with an undefined2 data type; the original DAT_DM names remain.
+It does not assert physical RAM, MMIO identity or external side effects.
+Never run it on a canonical project with a different saved inventory.
+
+The revised SLEIGH also includes opt-in nonnegative-SE shift forms and exact
+zero-product MX0 * 0 with parallel DM reads/writes. The isolated DTS GZF
+explicitly re-decodes individual native-proven shift, CE and nested counter
+instructions. It also models DM:3C14 as volatile in a scoped analysis
+snapshot. Merely deploying the new language cannot rewrite saved P-code
+in an existing Ghidra project.
+
+The separate Ghidra 12.1.3 native decompiler candidate patch is
+patches/ghidra-12.1.3/native-word-addressed-ptradd-guard.patch.
+It prevents ptrarith/ptraddundo oscillation when a 4-byte inferred element
+cannot be represented by an integral number of 3-byte PM addressable units.
+This is an out-of-tree change awaiting independent review; storing its patch
+does not install it in the runtime server decompiler.
+
+The five ORIGINAL, older DSP GZF corpus snapshots generate C for 322/322
+functions with the final local SDK. This is a non-strict compatibility
+regression only: the old snapshots still have missing per-instruction
+context/data types and pre-existing semantic warnings. DTS strict local
+acceptance neither closes those profiles nor proves full hardware audio
+equivalence. Production rollout and canonical Analysis migration require
+independent review and separately authorized deployment, guarded analysis
+updates, save and independent readback.
+
+Architecture-derived preparation passes and explicit safety/assembler limits:
+see docs/project-management/SUNPLUS_DSP_ARCHITECTURE_RECOVERY.md.

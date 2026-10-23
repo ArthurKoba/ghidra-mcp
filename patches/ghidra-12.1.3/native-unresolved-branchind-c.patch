@@ -1,0 +1,136 @@
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/flow.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/flow.cc
+@@ -751,8 +751,17 @@
+     else {
+       returnType = 0;
+       noParams = false;
+-      fc->setBadJumpTable(true);		// Consider using special name for switch variable
+-      data.warning("Treating indirect jump as call",op->getAddr());
++      // An unbounded native branch is NOT an unknown function call.  Its
++      // destination is still exact even when finite switch cases are not
++      // recoverable.  The transfer never falls through to its next native
++      // instruction, so the artificial CallSpec must not imply return.
++      // The C printer uses a dedicated opaque tail-transfer intrinsic.
++      // Keep the independent "Too many branches" recovery warning: the
++      // branch target domain is still unknown.
++      returnType = PcodeOp::noreturn;
++      noParams = true;
++      fc->setNoReturn(true);
++      fc->setBadJumpTable(true);
+     }
+     if (noParams) {
+       if (!fc->hasModel()) {
+@@ -1424,9 +1433,17 @@
+     op = tablelist[i];
+     JumpTable::RecoveryMode mode;
+     JumpTable *jt = data.recoverJumpTable(partial,op,this,mode); // Recover it
+-    if (jt == (JumpTable *)0) { // Could not recover jumptable
+-      if (!isFlowForInline())	// Unless this flow is being inlined for something else
+-	truncateIndirectJump(op,mode); // Treat the indirect jump as a call
++    if (jt == (JumpTable *)0) { // Failed to recover a finite jump-table
++      if (mode == JumpTable::fail_normal &&
++          op->getAddr().getSpace()->getWordSize() == 3) {
++        // Do not turn an unresolved *native* computed branch into CALLIND.
++        // Its exact symbolic target is preserved in BRANCHIND and the C
++        // backend emits it as an explicit terminal transfer.  Recovery's
++        // independent diagnostic remains visible until domain is proven.
++      }
++      else if (!isFlowForInline()) {
++        truncateIndirectJump(op,mode);
++      }
+     }
+     else if (jt->isPartial()) {
+       if (tablelist.size() > 1 && jt->getRecoverCount() <= 1) {
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/printc.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/printc.cc
+@@ -601,6 +601,16 @@
+ void PrintC::opBranchind(const PcodeOp *op)
+ 
+ {
++  const Funcdata *fd = op->getParent()->getFuncdata();
++  if (fd->findJumpTable(op) == (JumpTable *)0) {
++    // This is a native computed transfer with unknown domain, not a C call.
++    // The symbol deliberately exposes incomplete finite-target recovery.
++    pushOp(&function_call,op);
++    pushAtom(Atom("__ghidra_unresolved_indirect_jump",functoken,
++                  EmitMarkup::funcname_color,op,(const Funcdata *)0));
++    pushVn(op->getIn(0),op,mods);
++    return;
++  }
+   // FIXME:  This routine shouldn't emit directly
+   emit->tagOp(KEYWORD_SWITCH,EmitMarkup::keyword_color,op);	// Print header for switch
+   int4 id = emit->openParen(OPEN_PAREN);
+@@ -656,12 +666,23 @@
+ void PrintC::opCallind(const PcodeOp *op)
+ 
+ {
+-  pushOp(&function_call,op);
+-  pushOp(&dereference,op);
+   const Funcdata *fd = op->getParent()->getFuncdata();
+   FuncCallSpecs *fc = fd->getCallSpecs(op);
+   if (fc == (FuncCallSpecs *)0)
+     throw LowlevelError("Missing indirect function callspec");
++  if (fc->isBadJumpTable()) {
++    // Preserve an unknown native BRANCHIND as a transparent computed transfer,
++    // not the misleading C rendering "(*(code *)addr)()".  Its target value is
++    // unmodified; no finite table, target labels or return ABI are invented.
++    // This is a decompiler intrinsic, not an executable C library routine.
++    pushOp(&function_call,op);
++    pushAtom(Atom("__ghidra_unresolved_indirect_jump",functoken,
++                  EmitMarkup::funcname_color,op,(const Funcdata *)0));
++    pushVn(op->getIn(0),op,mods);
++    return;
++  }
++  pushOp(&function_call,op);
++  pushOp(&dereference,op);
+   int4 skip = getHiddenThisSlot(op, fc);
+   int4 count = op->numInput() - 1;
+   count -= (skip < 0) ? 0 : 1;
+@@ -3450,6 +3471,22 @@
+ {
+   FlowBlock *bl2;
+ 
++  // A BRANCHIND with no recovered JumpTable must not be emitted as a
++  // malformed "switch" or made into a fictional function call. Emit its
++  // symbolic terminal transfer as one ordinary C statement instead.
++  const PcodeOp *terminal = bl->getSwitchBlock()->lastOp();
++  if (terminal != (PcodeOp *)0 && terminal->code() == CPUI_BRANCHIND &&
++      terminal->getParent()->getFuncdata()->findJumpTable(terminal) == (JumpTable *)0) {
++    // Render ordinary operations in the switch root, but not its terminal
++    // BRANCHIND via BlockBasic (it is deliberately marked notPrinted).
++    pushMod();
++    setMod(no_branch);
++    bl->getSwitchBlock()->emit(this);
++    popMod();
++    emit->tagLine();
++    emitStatement(terminal);
++    return;
++  }
+   pushMod();
+   unsetMod(no_branch|only_branch);
+   pushMod();
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/jumptable.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/jumptable.cc
+@@ -521,6 +521,22 @@
+     if (constvn->isConstant()) {
+       maxValue = coveringmask( constvn->getOffset() );
+       maxValue = (maxValue + 1) & calc_mask(vn->getSize());
++    }
++  }
++  else if (op->code() == CPUI_INT_RIGHT) {
++    // A logical right shift by a constant has a provable, finite unsigned
++    // result domain.  A 16-bit word >> 8 can only be 0..255, regardless
++    // of the value provided by a DMA/CPU/hardware selector.  This is NOT
++    // a guess that the selector contains particular sample-rate codes.
++    const Varnode *count = op->getIn(1);
++    if (count->isConstant()) {
++      int4 inputBits = op->getIn(0)->getSize() * 8;
++      uintb right = count->getOffset();
++      if (inputBits > 0 && inputBits <= 8 * sizeof(uintb)) {
++        uintb possibleMask = (right >= (uintb)inputBits) ? 0 :
++                             (calc_mask(op->getIn(0)->getSize()) >> right);
++        maxValue = (possibleMask + 1) & calc_mask(vn->getSize());
++      }
+     }
+   }
+   else if (op->code() == CPUI_MULTIEQUAL) {	// Its possible the AND is duplicated across multiple blocks
