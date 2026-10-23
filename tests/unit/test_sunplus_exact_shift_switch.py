@@ -7,6 +7,7 @@ that same C++ patch without rebuilding the full engine.
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -97,10 +98,14 @@ int main() {
 '''
     source = tmp_path / "rightshift.cpp"
     source.write_text(prefix + _patched_shift_block() + suffix)
-    executable = tmp_path / "rightshift"
+    # MinGW on the hosted Windows runner has no libubsan; retain exhaustive
+    # compiled C++ execution there and the UBSAN-instrumented proof elsewhere.
+    executable = tmp_path / ("rightshift.exe" if sys.platform == "win32" else "rightshift")
+    flags = ["-std=c++11", "-O1"]
+    if sys.platform != "win32":
+        flags += ["-fsanitize=undefined", "-fno-sanitize-recover=undefined"]
     compiled = subprocess.run(
-        [compiler, "-std=c++11", "-O1", "-fsanitize=undefined",
-         "-fno-sanitize-recover=undefined", str(source), "-o", str(executable)],
+        [compiler, *flags, str(source), "-o", str(executable)],
         capture_output=True, text=True, timeout=30,
     )
     assert compiled.returncode == 0, compiled.stdout + compiled.stderr
