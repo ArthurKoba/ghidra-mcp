@@ -329,7 +329,7 @@ jobs:
         echo "✅ Installed Ghidra JARs to Maven local repository"
 
     - name: Build with Maven
-      run: mvn clean package assembly:single -q -DskipTests
+      run: mvn clean package assembly:single -q -DskipTests -Dghidra.version=12.1.3
 
     - name: Run offline Java tests
       run: |
