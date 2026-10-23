@@ -1,3 +1,10 @@
 # Patch files intentionally preserve whitespace in upstream diff context.
 *.patch -text whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab
 tests/fixtures/sunplus_sphe_audio_dsp/dts_dm16_evidence_20261014.txt text eol=lf
+
+# Reproducible model-source SHA-256 across Windows/Linux Git checkouts.
+*.slaspec text eol=lf
+*.cspec text eol=lf
+*.ldefs text eol=lf
+*.pspec text eol=lf
+*.sinc text eol=lf
