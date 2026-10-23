@@ -163,6 +163,13 @@ public class ProgramScriptService {
     }
 
     private void suppressAnalysisPrompt(Program program) throws IOException, ghidra.util.exception.CancelledException {
+        // Opening a previously analyzed project for inspection must not create
+        // a new saved version merely to repeat an already-satisfied flag.
+        // Newly imported/unsuppressed programs still need a durable flag so
+        // the GUI does not block MCP requests with an analysis prompt.
+        if (!ghidra.program.util.GhidraProgramUtilities.shouldAskToAnalyze(program)) {
+            return;
+        }
         ghidra.program.util.GhidraProgramUtilities.markProgramNotToAskToAnalyze(program);
         persistProgram(program, "Suppress analysis prompt");
     }

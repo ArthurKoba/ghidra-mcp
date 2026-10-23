@@ -1,0 +1,220 @@
+# Executable sequencer state, opt-in via codec_arch_stack_mode (not PM/DM RAM).
+# Contract: ADSP-218x Instruction Set Reference rev2, 2-3, 4-144..155;
+# ADSP-218x Hardware Reference rev1, 3-4..10, 3-26..37.
+# This layer does not change the existing saved-program C normalization mode.
+# Invalid stack over/underflow sets SSTAT and raises an explicit MODEL fault;
+# undocumented data after information loss is never silently fabricated.
+define space DSPSTACK type=ram_space size=2;
+define register offset=0x0d8 size=1 [ SSF ];
+define register offset=0x110 size=2 [
+ DSP_PC_DEPTH DSP_ARCH_LOOP_DEPTH DSP_ARCH_COUNT_DEPTH DSP_STATUS_DEPTH
+ DSP_CNTR_VALID DSP_ARCH_LOOP_END DSP_ARCH_LOOP_COND DSP_STACK_FAULT
+ DSP_PC_POP_PENDING DSP_IRQ_ENABLED DSP_PC_POP_ACTIVE
+];
+define register offset=0x140 size=2 [
+ DSP_ALT_AX0 DSP_ALT_AX1 DSP_ALT_MX0 DSP_ALT_MX1 DSP_ALT_AY0 DSP_ALT_AY1
+ DSP_ALT_MY0 DSP_ALT_MY1 DSP_ALT_SI DSP_ALT_SE DSP_ALT_AR DSP_ALT_MR0
+ DSP_ALT_MR1 DSP_ALT_MR2 DSP_ALT_SR0 DSP_ALT_SR1 DSP_ALT_AF DSP_ALT_MF DSP_ALT_SB
+];
+define pcodeop dsp_model_stack_fault;
+
+macro arch_sstat() {
+ SSTAT=(SSTAT & 0x00aa) | zext(DSP_PC_DEPTH==0) |
+       (zext(DSP_ARCH_COUNT_DEPTH==0)<<2) | (zext(DSP_STATUS_DEPTH==0)<<4) |
+       (zext(DSP_ARCH_LOOP_DEPTH==0)<<6);
+}
+macro arch_stack_error(kind) {
+ DSP_STACK_FAULT=kind;
+ dsp_model_stack_fault(kind);
+}
+macro arch_astat_pack() {
+ ASTAT=zext(AZF & 1) | (zext(ANF & 1)<<1) | (zext(AVF & 1)<<2) |
+       (zext(ACF & 1)<<3) | (zext(ASF & 1)<<4) | (zext(AQF & 1)<<5) |
+       (zext(MVF & 1)<<6) | (zext(SSF & 1)<<7);
+}
+macro arch_astat_write(value) {
+ ASTAT=value & 0x00ff;
+ local low:1=ASTAT:1;
+ AZF=low & 1; ANF=(low>>1)&1; AVF=(low>>2)&1; ACF=(low>>3)&1;
+ ASF=(low>>4)&1; AQF=(low>>5)&1; MVF=(low>>6)&1; SSF=(low>>7)&1;
+}
+macro arch_bank_swap(active, alternate) {
+ local previous:2=active; active=alternate; alternate=previous;
+}
+macro arch_mstat_write(value) {
+ local incoming:2=value & 0x007f;
+ if (((MSTAT ^ incoming) & 1)==0) goto <bank_done>;
+ arch_bank_swap(AX0,DSP_ALT_AX0); arch_bank_swap(AX1,DSP_ALT_AX1);
+ arch_bank_swap(MX0,DSP_ALT_MX0); arch_bank_swap(MX1,DSP_ALT_MX1);
+ arch_bank_swap(AY0,DSP_ALT_AY0); arch_bank_swap(AY1,DSP_ALT_AY1);
+ arch_bank_swap(MY0,DSP_ALT_MY0); arch_bank_swap(MY1,DSP_ALT_MY1);
+ arch_bank_swap(SI,DSP_ALT_SI); arch_bank_swap(SE,DSP_ALT_SE);
+ arch_bank_swap(AR,DSP_ALT_AR); arch_bank_swap(MR0,DSP_ALT_MR0);
+ arch_bank_swap(MR1,DSP_ALT_MR1); arch_bank_swap(MR2,DSP_ALT_MR2);
+ arch_bank_swap(SR0,DSP_ALT_SR0); arch_bank_swap(SR1,DSP_ALT_SR1);
+ arch_bank_swap(AF,DSP_ALT_AF); arch_bank_swap(MF,DSP_ALT_MF);
+ arch_bank_swap(SB,DSP_ALT_SB);
+<bank_done> MSTAT=incoming;
+}
+macro arch_pc_push(value) {
+ local incoming:2=value & 0x3fff;
+ if (DSP_PC_DEPTH<16) goto <pc_push_valid>;
+ SSTAT=SSTAT | 0x0002; arch_stack_error(1:2); goto <pc_push_done>;
+<pc_push_valid>
+ local slot:2=DSP_PC_DEPTH*2;
+ *[DSPSTACK]:2 slot=incoming;
+ DSP_PC_DEPTH=DSP_PC_DEPTH+1; PCSTACKTOP=incoming; arch_sstat();
+<pc_push_done>
+}
+macro arch_pc_pop(result) {
+ if (DSP_PC_DEPTH!=0) goto <pc_pop_valid>;
+ arch_sstat(); arch_stack_error(2:2); goto <pc_pop_done>;
+<pc_pop_valid>
+ DSP_PC_DEPTH=DSP_PC_DEPTH-1;
+ local slot:2=DSP_PC_DEPTH*2;
+ result=*[DSPSTACK]:2 slot;
+ if(DSP_PC_DEPTH==0) goto <pc_pop_empty>;
+ slot=slot-2; PCSTACKTOP=*[DSPSTACK]:2 slot; goto <pc_pop_flags>;
+<pc_pop_empty> PCSTACKTOP=0;
+<pc_pop_flags> arch_sstat();
+<pc_pop_done>
+}
+macro arch_cntr_load(value) {
+ local incoming:2=value & 0x3fff;
+ if (DSP_CNTR_VALID==0) goto <count_load>;
+ if (DSP_ARCH_COUNT_DEPTH<4) goto <count_push>;
+ SSTAT=SSTAT | 0x0008; arch_stack_error(3:2); goto <count_done>;
+<count_push>
+ local slot:2=0x40+DSP_ARCH_COUNT_DEPTH*2;
+ *[DSPSTACK]:2 slot=CNTR & 0x3fff; DSP_ARCH_COUNT_DEPTH=DSP_ARCH_COUNT_DEPTH+1;
+<count_load> CNTR=incoming; DSP_CNTR_VALID=1; arch_sstat();
+<count_done>
+}
+macro arch_cntr_pop() {
+ if (DSP_ARCH_COUNT_DEPTH!=0) goto <count_pop>;
+ DSP_CNTR_VALID=0; arch_sstat(); goto <count_pop_done>;
+<count_pop>
+ DSP_ARCH_COUNT_DEPTH=DSP_ARCH_COUNT_DEPTH-1;
+ local slot:2=0x40+DSP_ARCH_COUNT_DEPTH*2;
+ CNTR=*[DSPSTACK]:2 slot; DSP_CNTR_VALID=1; arch_sstat();
+<count_pop_done>
+}
+macro arch_loop_pop() {
+ if(DSP_ARCH_LOOP_DEPTH!=0) goto <loop_pop_valid>;
+ arch_sstat(); arch_stack_error(4:2); goto <loop_pop_done>;
+<loop_pop_valid>
+ DSP_ARCH_LOOP_DEPTH=DSP_ARCH_LOOP_DEPTH-1;
+ if(DSP_ARCH_LOOP_DEPTH==0) goto <loop_pop_empty>;
+ local slot:2=0x60+(DSP_ARCH_LOOP_DEPTH-1)*4;
+ local frame:4=*[DSPSTACK]:4 slot;
+ DSP_ARCH_LOOP_END=frame:2 & 0x3fff; local shifted:4=frame>>14; DSP_ARCH_LOOP_COND=shifted:2 & 15;
+ goto <loop_pop_flags>;
+<loop_pop_empty> DSP_ARCH_LOOP_END=0; DSP_ARCH_LOOP_COND=15;
+<loop_pop_flags> arch_sstat();
+<loop_pop_done>
+}
+macro arch_do(first,last,term) {
+ if (DSP_ARCH_LOOP_DEPTH<4) goto <do_pc_check>;
+ SSTAT=SSTAT | 0x0080; arch_stack_error(5:2); goto <do_done>;
+<do_pc_check>
+ if(DSP_PC_DEPTH<16) goto <do_push>;
+ SSTAT=SSTAT | 0x0002; arch_stack_error(1:2); goto <do_done>;
+<do_push>
+ local slot:2=0x60+DSP_ARCH_LOOP_DEPTH*4;
+ local frame:4=zext(last & 0x3fff) | (zext(term & 15)<<14);
+ *[DSPSTACK]:4 slot=frame; DSP_ARCH_LOOP_DEPTH=DSP_ARCH_LOOP_DEPTH+1;
+ DSP_ARCH_LOOP_END=last & 0x3fff; DSP_ARCH_LOOP_COND=term & 15;
+ arch_pc_push(first); arch_sstat();
+<do_done>
+}
+macro arch_status_push() {
+ if(DSP_STATUS_DEPTH<12) goto <status_push_valid>;
+ SSTAT=SSTAT | 0x0020; arch_stack_error(6:2); goto <status_push_done>;
+<status_push_valid>
+ arch_astat_pack();
+ local frame:4=zext(ASTAT & 0xff) | (zext(MSTAT & 0x7f)<<8) | (zext(IMASK & 0x3ff)<<15);
+ local slot:2=0x80+DSP_STATUS_DEPTH*4;
+ *[DSPSTACK]:4 slot=frame; DSP_STATUS_DEPTH=DSP_STATUS_DEPTH+1; arch_sstat();
+<status_push_done>
+}
+macro arch_status_pop() {
+ if(DSP_STATUS_DEPTH!=0) goto <status_pop_valid>;
+ arch_sstat(); arch_stack_error(7:2); goto <status_pop_done>;
+<status_pop_valid>
+ DSP_STATUS_DEPTH=DSP_STATUS_DEPTH-1;
+ local slot:2=0x80+DSP_STATUS_DEPTH*4;
+ local frame:4=*[DSPSTACK]:4 slot;
+ local saved_a:2=frame:2 & 0xff;
+ local shifted_m:4=frame>>8; local saved_m:2=shifted_m:2 & 0x7f;
+ local shifted_i:4=frame>>15; IMASK=shifted_i:2 & 0x3ff;
+ arch_mstat_write(saved_m); arch_astat_write(saved_a); arch_sstat();
+<status_pop_done>
+}
+macro arch_test_condition(code,result) {
+ result=0;
+ if(code==0) goto <cond_eq>; if(code==1) goto <cond_ne>;
+ if(code==2) goto <cond_gt>; if(code==3) goto <cond_le>;
+ if(code==4) goto <cond_lt>; if(code==5) goto <cond_ge>;
+ if(code==6) goto <cond_av>; if(code==7) goto <cond_nav>;
+ if(code==8) goto <cond_ac>; if(code==9) goto <cond_nac>;
+ if(code==10) goto <cond_neg>; if(code==11) goto <cond_pos>;
+ if(code==12) goto <cond_mv>; if(code==13) goto <cond_nmv>;
+ if(code==14) goto <cond_nce>;
+ result=1; goto <cond_done>;
+<cond_eq> result=(AZF!=0); goto <cond_done>;
+<cond_ne> result=(AZF==0); goto <cond_done>;
+<cond_gt> result=(AZF==0)&&(ANF==AVF); goto <cond_done>;
+<cond_le> result=(AZF!=0)||(ANF!=AVF); goto <cond_done>;
+<cond_lt> result=(ANF!=AVF); goto <cond_done>;
+<cond_ge> result=(ANF==AVF); goto <cond_done>;
+<cond_av> result=(AVF!=0); goto <cond_done>;
+<cond_nav> result=(AVF==0); goto <cond_done>;
+<cond_ac> result=(ACF!=0); goto <cond_done>;
+<cond_nac> result=(ACF==0); goto <cond_done>;
+<cond_neg> result=(ASF!=0); goto <cond_done>;
+<cond_pos> result=(ASF==0); goto <cond_done>;
+<cond_mv> result=(MVF!=0); goto <cond_done>;
+<cond_nmv> result=(MVF==0); goto <cond_done>;
+<cond_nce>
+ if(DSP_CNTR_VALID!=0) goto <cond_valid_counter>;
+ arch_stack_error(8:2); goto <cond_done>;
+<cond_valid_counter>
+ CNTR=(CNTR-1)&0x3fff; CEF=(CNTR==0); result=(CEF==0);
+ if(CEF==0) goto <cond_done>; arch_cntr_pop();
+<cond_done>
+}
+macro arch_end_instruction(currentword) {
+ if(DSP_ARCH_LOOP_DEPTH==0) goto <arch_end>;
+ if(DSP_ARCH_LOOP_END!=currentword) goto <arch_end>;
+ local finished:1=0;
+ if(DSP_ARCH_LOOP_COND==14) goto <arch_count_ce>;
+ if(DSP_ARCH_LOOP_COND==15) goto <arch_repeat>;
+ local condition:1=0;
+ arch_test_condition(DSP_ARCH_LOOP_COND,condition);
+ finished=(condition==0); goto <arch_decided>;
+<arch_count_ce>
+ if(DSP_CNTR_VALID!=0) goto <arch_valid_count>;
+ arch_stack_error(8:2); goto <arch_end>;
+<arch_valid_count>
+ CNTR=(CNTR-1)&0x3fff; CEF=(CNTR==0); finished=CEF;
+<arch_decided>
+ if(finished==0) goto <arch_repeat>;
+ local oldterm:2=DSP_ARCH_LOOP_COND;
+ local discarded:2=0; arch_pc_pop(discarded); arch_loop_pop();
+ if(oldterm!=14) goto <arch_end>;
+ arch_cntr_pop(); goto <arch_end>;
+<arch_repeat>
+ arch_astat_pack(); goto [PCSTACKTOP];
+<arch_end>
+ arch_astat_pack();
+}
+
+# TOPPCSTACK read schedules a pop AFTER the following instruction. Commit
+# it on ordinary fallthrough and on explicit control transfers, preserving
+# the next instruction's reads before the pending update.
+macro arch_complete_pending_pc() {
+ if(DSP_PC_POP_ACTIVE==0) goto <delay_done>;
+ DSP_PC_POP_ACTIVE=0;
+ local discarded:2=0; arch_pc_pop(discarded);
+<delay_done>
+}

@@ -1,0 +1,216 @@
+# Native instruction constructors for the executable software sequencer.
+ArchCond: "IF EQ " is cond4=0 { local ok:1=0; arch_test_condition(0:2,ok); export ok; }
+ArchCond: "IF NE " is cond4=1 { local ok:1=0; arch_test_condition(1:2,ok); export ok; }
+ArchCond: "IF GT " is cond4=2 { local ok:1=0; arch_test_condition(2:2,ok); export ok; }
+ArchCond: "IF LE " is cond4=3 { local ok:1=0; arch_test_condition(3:2,ok); export ok; }
+ArchCond: "IF LT " is cond4=4 { local ok:1=0; arch_test_condition(4:2,ok); export ok; }
+ArchCond: "IF GE " is cond4=5 { local ok:1=0; arch_test_condition(5:2,ok); export ok; }
+ArchCond: "IF AV " is cond4=6 { local ok:1=0; arch_test_condition(6:2,ok); export ok; }
+ArchCond: "IF NOT AV " is cond4=7 { local ok:1=0; arch_test_condition(7:2,ok); export ok; }
+ArchCond: "IF AC " is cond4=8 { local ok:1=0; arch_test_condition(8:2,ok); export ok; }
+ArchCond: "IF NOT AC " is cond4=9 { local ok:1=0; arch_test_condition(9:2,ok); export ok; }
+ArchCond: "IF NEG " is cond4=10 { local ok:1=0; arch_test_condition(10:2,ok); export ok; }
+ArchCond: "IF POS " is cond4=11 { local ok:1=0; arch_test_condition(11:2,ok); export ok; }
+ArchCond: "IF MV " is cond4=12 { local ok:1=0; arch_test_condition(12:2,ok); export ok; }
+ArchCond: "IF NOT MV " is cond4=13 { local ok:1=0; arch_test_condition(13:2,ok); export ok; }
+ArchCond: "IF NOT CE " is cond4=14 { local ok:1=0; arch_test_condition(14:2,ok); export ok; }
+ArchCond: "" is cond4=15 { local ok:1=0; arch_test_condition(15:2,ok); export ok; }
+ArchTerm: "NE" is term4=0 { export 0:2; }
+ArchTerm: "EQ" is term4=1 { export 1:2; }
+ArchTerm: "LE" is term4=2 { export 2:2; }
+ArchTerm: "GT" is term4=3 { export 3:2; }
+ArchTerm: "GE" is term4=4 { export 4:2; }
+ArchTerm: "LT" is term4=5 { export 5:2; }
+ArchTerm: "NOT AV" is term4=6 { export 6:2; }
+ArchTerm: "AV" is term4=7 { export 7:2; }
+ArchTerm: "NOT AC" is term4=8 { export 8:2; }
+ArchTerm: "AC" is term4=9 { export 9:2; }
+ArchTerm: "POS" is term4=10 { export 10:2; }
+ArchTerm: "NEG" is term4=11 { export 11:2; }
+ArchTerm: "NOT MV" is term4=12 { export 12:2; }
+ArchTerm: "MV" is term4=13 { export 13:2; }
+ArchTerm: "CE" is term4=14 { export 14:2; }
+ArchTerm: "FOREVER" is term4=15 { export 15:2; }
+
+:ArchCond "CALL" JumpAddr is codec_arch_stack_mode=1 & type10=3 & call18=1 & ArchCond & JumpAddr {
+ if(ArchCond==0) goto <skip_call>;
+  arch_pc_push(inst_next / 3); arch_astat_pack();
+ arch_complete_pending_pc(); call JumpAddr;
+<skip_call>
+}
+:ArchCond "JUMP" JumpAddr is codec_arch_stack_mode=1 & type10=3 & call18=0 & ArchCond & JumpAddr {
+ if(ArchCond==0) goto <skip_jump>;
+  arch_astat_pack(); arch_complete_pending_pc(); goto JumpAddr;
+<skip_jump>
+}
+:ArchCond "CALL (" JumpI ")" is codec_arch_stack_mode=1 & op8=0x0b & ind_s=1 & ArchCond & JumpI {
+ if(ArchCond==0) goto <skip_icall>;
+ local target:2=JumpI & 0x3fff;
+  arch_pc_push(inst_next / 3); arch_astat_pack();
+ arch_complete_pending_pc(); call [target];
+<skip_icall>
+}
+:ArchCond "JUMP (" JumpI ")" is codec_arch_stack_mode=1 & op8=0x0b & ind_s=0 & ArchCond & JumpI {
+ if(ArchCond==0) goto <skip_ijump>;
+ local target:2=JumpI & 0x3fff;
+  arch_astat_pack(); arch_complete_pending_pc(); goto [target];
+<skip_ijump>
+}
+:ArchCond "RTS" is codec_arch_stack_mode=1 & ret19=0x5000 & rettype=0 & ArchCond {
+ if(ArchCond==0) goto <skip_rts>;
+
+ local target:2=0; arch_pc_pop(target); arch_astat_pack(); arch_complete_pending_pc(); return [target];
+<skip_rts>
+}
+:ArchCond "RTI" is codec_arch_stack_mode=1 & ret19=0x5000 & rettype=1 & ArchCond {
+ if(ArchCond==0) goto <skip_rti>;
+
+ if(DSP_PC_DEPTH==0) goto <rti_pc_error>;
+ if(DSP_STATUS_DEPTH==0) goto <rti_status_error>;
+ local target:2=0; arch_pc_pop(target); arch_status_pop(); arch_complete_pending_pc(); return [target];
+<rti_pc_error> arch_stack_error(2:2); goto <skip_rti>;
+<rti_status_error> arch_stack_error(7:2);
+<skip_rti>
+}
+:"DO" LoopAddr "UNTIL" ArchTerm is codec_arch_stack_mode=1 & type11=5 & loop14 & LoopAddr & ArchTerm {
+  arch_do(inst_next / 3,loop14:2,ArchTerm);
+}
+
+ArchSts: "" is stack_sts=0 {}
+ArchSts: "" is stack_sts=1 {}
+ArchSts: "PUSH STS" is stack_sts=2 { arch_status_push(); }
+ArchSts: "POP STS" is stack_sts=3 { arch_status_pop(); }
+ArchCnt: "" is stack_count=0 {}
+ArchCnt: "POP CNTR" is stack_count=1 { arch_cntr_pop(); }
+ArchPc: "" is stack_pc=0 {}
+ArchPc: "POP PC" is stack_pc=1 { local discarded:2=0; arch_pc_pop(discarded); }
+ArchLoop: "" is stack_loop=0 {}
+ArchLoop: "POP LOOP" is stack_loop=1 { arch_loop_pop(); }
+ArchIrq: "" is stack_irq=0 {}
+ArchIrq: "DIS INTS" is stack_irq=2 { DSP_IRQ_ENABLED=0; }
+ArchIrq: "ENA INTS" is stack_irq=3 { DSP_IRQ_ENABLED=1; }
+:ArchSts ArchCnt ArchPc ArchLoop ArchIrq is codec_arch_stack_mode=1 & op8=4 & stack_zero=0 & ArchSts & ArchCnt & ArchPc & ArchLoop & ArchIrq {
+
+ build ArchSts; build ArchCnt; build ArchPc; build ArchLoop; build ArchIrq;
+}
+
+:"TOPPCSTACK =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=15 & IntSrc {
+  arch_pc_push(IntSrc);
+}
+:"" IntDst "= TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & IntDst {
+
+ if(DSP_PC_DEPTH!=0) goto <read_top>;
+ arch_stack_error(2:2); goto <read_top_done>;
+<read_top> IntDst=PCSTACKTOP; DSP_PC_POP_PENDING=1;
+<read_top_done>
+}
+:ENA_SEC_REG is codec_arch_stack_mode=1 & whole24=0x0c0030 { local next:2=MSTAT|1; arch_mstat_write(next); }
+:DIS_SEC_REG is codec_arch_stack_mode=1 & whole24=0x0c0020 { local next:2=MSTAT&0xfffe; arch_mstat_write(next); }
+
+:LDI ASTAT, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=0 & ASTAT & data14 {
+ local value:2=data14; arch_astat_write(value);
+}
+:DMREAD ASTAT, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=0 & ASTAT & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; arch_astat_write(value);
+}
+:"ASTAT =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=0 & IntSrc {
+ local value:2=IntSrc; arch_astat_write(value);
+}
+
+:LDI MSTAT, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=1 & MSTAT & data14 {
+ local value:2=data14; arch_mstat_write(value);
+}
+:DMREAD MSTAT, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=1 & MSTAT & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; arch_mstat_write(value);
+}
+:"MSTAT =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=1 & IntSrc {
+ local value:2=IntSrc; arch_mstat_write(value);
+}
+
+:LDI SSTAT, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=2 & SSTAT & data14 {
+ local value:2=data14; arch_sstat();
+}
+:DMREAD SSTAT, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=2 & SSTAT & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; arch_sstat();
+}
+:"SSTAT =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=2 & IntSrc {
+ local value:2=IntSrc; arch_sstat();
+}
+
+:LDI IMASK, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=3 & IMASK & data14 {
+ local value:2=data14; IMASK=value & 0x3ff;
+}
+:DMREAD IMASK, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=3 & IMASK & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; IMASK=value & 0x3ff;
+}
+:"IMASK =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=3 & IntSrc {
+ local value:2=IntSrc; IMASK=value & 0x3ff;
+}
+
+:LDI CNTR, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=5 & CNTR & data14 {
+ local value:2=data14; arch_cntr_load(value);
+}
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=5 & CNTR & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; arch_cntr_load(value);
+}
+:"CNTR =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=5 & IntSrc {
+ local value:2=IntSrc; arch_cntr_load(value);
+}
+
+:LDI OWRCNTR, data14 is codec_arch_stack_mode=1 & op4=3 & rgp=3 & reg4=13 & OWRCNTR & data14 {
+ local value:2=data14; CNTR=value & 0x3fff; DSP_CNTR_VALID=1;
+}
+:DMREAD OWRCNTR, addr14 is codec_arch_stack_mode=1 & type3=4 & dir20=0 & rgp=3 & reg4=13 & OWRCNTR & addr14 {
+ local address:2=addr14; local value:2=*[DM]:2 address; CNTR=value & 0x3fff; DSP_CNTR_VALID=1;
+}
+:"OWRCNTR =" IntSrc is codec_arch_stack_mode=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=13 & IntSrc {
+ local value:2=IntSrc; CNTR=value & 0x3fff; DSP_CNTR_VALID=1;
+}
+
+:"ASTAT = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=0 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; arch_astat_write(value); DSP_PC_POP_PENDING=1;
+<top_end>
+}
+
+:"MSTAT = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=1 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; arch_mstat_write(value); DSP_PC_POP_PENDING=1;
+<top_end>
+}
+
+:"SSTAT = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=2 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; arch_sstat(); DSP_PC_POP_PENDING=1;
+<top_end>
+}
+
+:"IMASK = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=3 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; IMASK=value & 0x3ff; DSP_PC_POP_PENDING=1;
+<top_end>
+}
+
+:"CNTR = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=5 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; arch_cntr_load(value); DSP_PC_POP_PENDING=1;
+<top_end>
+}
+
+:"OWRCNTR = TOPPCSTACK" is codec_arch_stack_mode=1 & type17=0x0d0 & src_rgp=3 & src_reg=15 & dst_rgp=3 & dst_reg=13 {
+
+ if(DSP_PC_DEPTH!=0) goto <top_valid>;
+ arch_stack_error(2:2); goto <top_end>;
+<top_valid> local value:2=PCSTACKTOP; CNTR=value & 0x3fff; DSP_CNTR_VALID=1; DSP_PC_POP_PENDING=1;
+<top_end>
+}

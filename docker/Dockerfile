@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y \
     wget \
     unzip \
     maven \
+    build-essential \
+    patch \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Download Ghidra
@@ -44,6 +47,30 @@ RUN set -eux; \
       "$LANG_DIR/sunplus_sphe_audio_dsp.sla"; \
     chmod 0644 "$LANG_DIR/sunplus_sphe_audio_dsp.sla"; \
     test -s "$LANG_DIR/sunplus_sphe_audio_dsp.sla"
+
+# Build the complete native C-generator fixes from the exact source bundled
+# with the Ghidra 12.1.3 distribution.  Installing SLEIGH alone is NOT enough:
+# the pinned PCM 256-target recovery, native unbounded branches and safe PM
+# pointer arithmetic all depend on the patched native decompiler executable.
+# Keep source patches in the image build, rather than shipping an opaque binary.
+COPY patches/ghidra-12.1.3 /tmp/ghidra-native-patches
+RUN set -eux; \
+    test "${GHIDRA_VERSION}" = "12.1.3"; \
+    ROOT=/opt/ghidra; \
+    CPP="${ROOT}/Ghidra/Features/Decompiler/src/decompile/cpp"; \
+    test -f "${CPP}/Makefile"; \
+    for patchfile in \
+      native-word-addressed-ptradd-guard.patch \
+      native-unresolved-branchind-c.patch \
+      native-explicit-selfloop-c.patch; do \
+        patch --batch --forward -p1 -d "${ROOT}" \
+          < "/tmp/ghidra-native-patches/${patchfile}"; \
+    done; \
+    make -C "${CPP}" ghidra_opt -j2; \
+    install -m 0755 "${CPP}/ghidra_opt" \
+      "${ROOT}/Ghidra/Features/Decompiler/os/linux_x86_64/decompile"; \
+    test -x "${ROOT}/Ghidra/Features/Decompiler/os/linux_x86_64/decompile"; \
+    sha256sum "${ROOT}/Ghidra/Features/Decompiler/os/linux_x86_64/decompile"
 
 # Set Ghidra environment
 ENV GHIDRA_HOME=/opt/ghidra

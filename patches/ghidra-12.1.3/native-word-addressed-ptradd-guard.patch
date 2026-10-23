@@ -1,0 +1,20 @@
+--- a/Ghidra/Features/Decompiler/src/decompile/cpp/ruleaction.cc
++++ b/Ghidra/Features/Decompiler/src/decompile/cpp/ruleaction.cc
+@@ -6664,6 +6664,17 @@
+     if (ct->getMetatype() == TYPE_PTR) break;
+   }
+   if (slot == op->numInput()) return 0;
++  // A PTRADD scale is expressed in addressable units.  Never promote an
++  // inferred pointer to a non-integral element stride in a word-addressed
++  // space: a 4-byte inferred element cannot be traversed in 3-byte PM words.
++  // Otherwise ptrarith and ptraddundo reverse each other indefinitely.
++  if (ct->getMetatype() == TYPE_PTR) {
++    const TypePointer *tp = (const TypePointer *)ct;
++    int4 unitBytes = tp->getWordSize();
++    int4 elementBytes = tp->getPtrTo()->getAlignSize();
++    if (unitBytes > 1 && elementBytes > 0 && elementBytes % unitBytes != 0)
++      return 0;
++  }
+   if (evaluatePointerExpression(op, slot) != 2) return 0;
+   if (!verifyPreferredPointer(op, slot)) return 0;
+ 

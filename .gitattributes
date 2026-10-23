@@ -1,0 +1,2 @@
+# Patch files intentionally preserve whitespace in upstream diff context.
+*.patch whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab

@@ -968,6 +968,7 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `connect_instance` - Resolve a project selector and activate its isolated worker session
 - `create_project` - Create a local project and return its stable project_id
 - `delete_project` - Delete a project by stable project_id
+- `hard_stop_worker` - hard_stop_worker
 - `import_file` - Import a binary into an explicit project_id session
 - `list_instances` - Discover running Ghidra MCP instances (UDS + TCP port scan)
 - `list_projects` - List projects with stable project_id values and session state
@@ -981,7 +982,10 @@ Defined in the Python bridge itself (instance discovery, tool-group management);
 - `search_tools` - Search the full tool catalog by keyword
 - `set_project_idle_timeout` - set_project_idle_timeout
 - `set_worker_enabled` - set_worker_enabled
+- `set_worker_max_heap_mb` - set_worker_max_heap_mb
+- `start_worker` - start_worker
 - `unload_tool_group` - Unregister a tool group's dynamic tools
+- `worker_heap_settings` - worker_heap_settings
 
 <!-- END GENERATED API REFERENCE -->
 
