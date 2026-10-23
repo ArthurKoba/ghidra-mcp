@@ -344,7 +344,8 @@ jobs:
         # behavior (#384/#385). Matching only com.xebyte.offline meant they never
         # ran in CI at all. The one ProgramBuilder suite self-skips via assumeTrue
         # when GHIDRA_INSTALL_DIR is unset, which is the case here.
-        mvn -q test -Pcoverage-gate -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
+        # Match the 12.1.3 jars installed above, not the 12.1.2 POM default.
+        mvn -q test -Pcoverage-gate -Dghidra.version=12.1.3 -Dtest='com.xebyte.offline.*Test,com.xebyte.core.*Test'
 
     - name: Verify build artifacts
       run: |
