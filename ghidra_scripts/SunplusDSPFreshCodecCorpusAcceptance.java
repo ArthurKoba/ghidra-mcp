@@ -44,10 +44,11 @@ public class SunplusDSPFreshCodecCorpusAcceptance extends GhidraScript {
       if(scoped<1 || scoped>2000)throw new IllegalStateException("invalid scoped native inventory="+scoped);
       expected=scoped;
     }
-    // Generic original-source validation for any new codec QA image.  The
-    // caller must provide an explicit SHA and denominator; only a sandboxed
-    // QA project path can use this route.  Never accept a name-only match.
-    if(expected==null && args.length==4 &&
+    // Generic original-source validation for any new codec QA image. The
+    // strict-native six-argument corpus gate uses this SAME fresh QA path
+    // with exact original SHA and explicit function/source denominators.
+    // Never accept a name-only match or an inferred discovery count.
+    if(expected==null && args.length>=4 &&
        args[3].matches("[0-9a-f]{64}") &&
        args[3].equals(currentProgram.getExecutableSHA256()) &&
        currentProgram.getDomainFile()!=null &&
@@ -61,8 +62,20 @@ public class SunplusDSPFreshCodecCorpusAcceptance extends GhidraScript {
     if(!"SunplusSPHEAudioDSP:BE:16:default".equals(currentProgram.getLanguageID().getIdAsString()))
       throw new IllegalStateException("wrong DSP ISA "+currentProgram.getLanguageID());
     String mode=args.length==0?"baseline":args[0];
-    if(!mode.equals("baseline")&&!mode.equals("strict"))throw new IllegalStateException("mode=baseline|strict");
-    boolean strict=mode.equals("strict");
+    if(!mode.equals("baseline")&&!mode.equals("strict")&&
+       !mode.equals("strict-native"))
+      throw new IllegalStateException("mode=baseline|strict|strict-native");
+    boolean strict=mode.equals("strict")||mode.equals("strict-native");
+    boolean releaseNative=mode.equals("strict-native");
+    // The release-native gate cannot mistake a smaller newly discovered
+    // instruction inventory for complete CE/C coverage. Its frozen source
+    // requirements are supplied by the authoritative module truth table,
+    // never inferred from a freshly modified Analyzer database.
+    if(releaseNative && (args.length!=6 ||
+       !args[3].matches("[0-9a-f]{64}") ||
+       !args[3].equals(currentProgram.getExecutableSHA256())))
+      throw new IllegalStateException(
+          "strict-native needs exact source SHA, functions, sourceDO, decodedPM");
     // Optional exact snapshot inventory for a *cloned* project after guarded
     // function discovery. Never infer acceptance from the number found: caller
     // must name a concrete denominator and all resulting functions are audited.
@@ -116,6 +129,8 @@ public class SunplusDSPFreshCodecCorpusAcceptance extends GhidraScript {
     }finally{dc.dispose();}
     if(out!=null)Files.write(out.resolve("index.psv"),index,StandardOpenOption.CREATE_NEW);
     int ceCount=0,withConditional=0,withoutConditional=0,ownerMissing=0,endMissing=0,withDirect=0,withIndirect=0;
+    int sourceDecodedPm=0;
+    int rawInvalidNativeFlow=0;
     // Presence of CBRANCH is NOT evidence of a native DO..CE backedge.
     // Sign/shift P-code inside the final instruction may emit only a local
     // relative CBRANCH in constant space without any PM control-flow edge.
@@ -125,6 +140,9 @@ public class SunplusDSPFreshCodecCorpusAcceptance extends GhidraScript {
     for(Instruction inst:currentProgram.getListing().getInstructions(true)){
       monitor.checkCancelled();
       if(!"PM".equals(inst.getAddress().getAddressSpace().getName()))continue;
+      sourceDecodedPm++;
+      if("INVALID".equals(inst.getFlowType().toString()))
+        rawInvalidNativeFlow++;
       Matcher m=CE.matcher(inst.toString().trim());
       if(!m.matches())continue;
       ceCount++;
@@ -182,6 +200,39 @@ public class SunplusDSPFreshCodecCorpusAcceptance extends GhidraScript {
       " ce_unresolved_indirect_target="+unresolvedIndirectTarget+
       " ce_missing_end="+endMissing+" ce_invalid_owner="+ownerMissing+" mode="+mode);
     if(fail!=0||seen!=expected)throw new IllegalStateException("Incomplete whole-function C corpus: "+program);
+    if(releaseNative) {
+      int sourceDO=Integer.parseInt(args[4]);
+      int expectedDecodedPM=Integer.parseInt(args[5]);
+      if(sourceDO<1||expectedDecodedPM<1)
+        throw new IllegalStateException("Invalid frozen native source denominator");
+      println("FULL_NATIVE_SOURCE_INVENTORY program="+program+
+        " DO="+ceCount+"/"+sourceDO+
+        " decoded_PM="+sourceDecodedPm+"/"+expectedDecodedPM+
+        " source_sha256="+currentProgram.getExecutableSHA256());
+      if(ceCount!=sourceDO||sourceDecodedPm!=expectedDecodedPM)
+        throw new IllegalStateException("Native source inventory drift: "+
+          program+" DO "+ceCount+"/"+sourceDO+" decoded "+
+          sourceDecodedPm+"/"+expectedDecodedPM);
+      // The native ISA can encode CALL and counted CE in one instruction.
+      // Ghidra's FlowType cannot express both, so allow INVALID only when
+      // the processor's source-backed composite proof is saved in this SAME
+      // program, and no INVALID instruction remains unexplained.
+      var compound=currentProgram.getOptions(
+        "Sunplus DSP Native Composite CE CALL");
+      int confirmed=compound.getInt("verified_composite_ce_call_count",0);
+      int unresolved=compound.getInt("unresolved_invalid_native_flow_count",0);
+      println("FULL_NATIVE_COMPOSITE_FLOW program="+program+
+        " raw_invalid="+rawInvalidNativeFlow+
+        " source_verified="+confirmed+" unsupported="+unresolved);
+      if(rawInvalidNativeFlow!=confirmed || unresolved!=0)
+        throw new IllegalStateException("UNSUPPORTED compound CALL/CE Ghidra flow: "+
+          program+" raw="+rawInvalidNativeFlow+
+          " confirmed="+confirmed+" unresolved="+unresolved);
+      if(unresolvedIndirectTarget!=0 || withIndirect!=0)
+        throw new IllegalStateException("UNSUPPORTED indirect native CE targets: "+
+          program+" indirect="+withIndirect+
+          " unresolved="+unresolvedIndirectTarget);
+    }
     if(strict&&(ownerMissing!=0||endMissing!=0))
       throw new IllegalStateException("Basic corpus acceptance failure: "+program);
     if(strict&&(wrongDirectTarget!=0||withoutConditional!=0||externalBackedgeShape!=ceCount||unknownOpcode!=0||

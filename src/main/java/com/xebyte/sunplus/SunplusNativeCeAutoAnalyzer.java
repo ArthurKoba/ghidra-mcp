@@ -58,7 +58,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     private static final int MAX_CHANGED_FUNCTIONS = 120;
 
     private record Loop(int first, int last, Instruction begin, Function owner) {}
-    private record Candidate(Loop loop, byte[] endBytes) {}
+    private record Candidate(Loop loop, byte[] endBytes, boolean missingCe,
+                             Address nativeCallTarget) {}
 
     public SunplusNativeCeAutoAnalyzer() {
         super("Sunplus DSP Native DO/CE Flow",
@@ -133,23 +134,41 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             text.startsWith("CNTR =");
     }
 
-    private static boolean nativeCeIndirect(Loop loop, Listing listing, Program p) {
-        Instruction end = listing.getInstructionAt(pm(p, loop.last));
-        // A CE endpoint can also execute IF LT/GT/EQ arithmetic. Its own
-        // predicate adds CBRANCH operators; requiring exactly one loses a
-        // source-encoded counted loop. Only the CE's unique BRANCHIND and the
-        // matching original DO instruction establish the hardware backedge.
-        if (end == null || end.getLength() != 3 ||
-            code(end, PcodeOp.CBRANCH) < 1 ||
-            code(end, PcodeOp.BRANCHIND) != 1 ||
-            code(end, PcodeOp.BRANCH) != 0) return false;
+    /**
+     * Original DO words encode their CE endpoint irrespective of whether the
+     * cached instruction context currently emits a counted-loop backedge.
+     * A missing CE is recoverable only when the endpoint has no independent
+     * machine control transfer or control-stack operation. The caller still
+     * must prove its complete nested counter-frame/data-flow contract.
+     */
+    private static boolean nativeCeRecoverable(Loop loop, Listing listing, Program p) {
+        Instruction end=listing.getInstructionAt(pm(p,loop.last));
+        if(end==null||end.getLength()!=3||
+           loop.owner==null||!loop.owner.getBody().contains(end.getAddress())||
+           nativeCounterWrite(end)||mutatesControlStack(end)||
+           code(end,PcodeOp.CALL)!=0||code(end,PcodeOp.RETURN)!=0||
+           end.getFlowType().isCall()||end.getFlowType().isTerminal())
+            return false;
+        boolean alreadyIndirect=code(end,PcodeOp.CBRANCH)>=1 &&
+            code(end,PcodeOp.BRANCHIND)==1 &&
+            code(end,PcodeOp.BRANCH)==0;
+        boolean missingContext=code(end,PcodeOp.BRANCHIND)==0 &&
+            code(end,PcodeOp.BRANCH)==0 &&
+            code(end,PcodeOp.CALL)==0 &&
+            code(end,PcodeOp.RETURN)==0 &&
+            !end.getFlowType().isCall() &&
+            !end.getFlowType().isJump() &&
+            !end.getFlowType().isTerminal() &&
+            !end.getFlowType().isComputed() &&
+            !end.toString().trim().startsWith("DO ");
+        if(!alreadyIndirect&&!missingContext)return false;
         try {
-            byte[] raw = loop.begin.getBytes();
-            if (raw.length != 3) return false;
-            int bits = (raw[0] & 255) << 16 | (raw[1] & 255) << 8 | (raw[2] & 255);
-            return bits >>> 18 == 5 &&
-                (bits & 15) == 14 && ((bits >>> 4) & 0x3fff) == loop.last;
-        } catch (ghidra.program.model.mem.MemoryAccessException unreadable) {
+            byte[] raw=loop.begin.getBytes();
+            if(raw.length!=3)return false;
+            int bits=(raw[0]&255)<<16|(raw[1]&255)<<8|(raw[2]&255);
+            return bits>>>18==5&&(bits&15)==14&&
+                ((bits>>>4)&0x3fff)==loop.last;
+        }catch(ghidra.program.model.mem.MemoryAccessException unreadable){
             return false;
         }
     }
@@ -163,7 +182,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             monitor.checkCancelled();
             if (outer.owner == null || outer.first >= outer.last ||
                 outer.last - outer.first > MAX_LOOP_WORDS ||
-                !nativeCeIndirect(outer, listing, program)) continue;
+                !nativeCeRecoverable(outer, listing, program)) continue;
             List<Loop> children = new ArrayList<>();
             boolean impossible = false;
             for (Loop other : loops) {
@@ -178,7 +197,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                 Loop child = children.get(j);
                 if (child.first >= child.last ||
                     (j>0 && children.get(j-1).last >= child.first) ||
-                    !nativeCeIndirect(child,listing,program)) { impossible=true; break; }
+                    !nativeCeRecoverable(child,listing,program)) { impossible=true; break; }
             }
             if (impossible) continue;
             Instruction outerWriter = null;
@@ -271,7 +290,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             monitor.checkCancelled();
             if(outer.owner==null||outer.first>=outer.last||
                outer.last-outer.first>MAX_LOOP_WORDS||
-               !nativeCeIndirect(outer,listing,program))continue;
+               !nativeCeRecoverable(outer,listing,program))continue;
             List<Loop> inside=new ArrayList<>();
             boolean ambiguous=false;
             for(Loop another:loops) {
@@ -294,12 +313,12 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                     middle=mid;
                 }
             }
-            if(ambiguous||middle==null||!nativeCeIndirect(middle,listing,program))continue;
+            if(ambiguous||middle==null||!nativeCeRecoverable(middle,listing,program))continue;
             List<Loop> inner=new ArrayList<>();
             for(Loop item:inside) {
                 if(item==middle)continue;
                 if(item.first<=middle.first||item.last>=middle.last||
-                   !nativeCeIndirect(item,listing,program)) {ambiguous=true;break;}
+                   !nativeCeRecoverable(item,listing,program)) {ambiguous=true;break;}
                 inner.add(item);
             }
             if(ambiguous||inner.isEmpty()||inner.size()>4)continue;
@@ -358,6 +377,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
         Map<String,Boolean> callReturnMemo=new LinkedHashMap<>();
         Map<Address,Boolean> countConsumerMemo=new LinkedHashMap<>();
         todo.add(new NestedFlowState(outer.first+1,outer.first,1,false));
+        Set<Integer> reachedCeEnds=new LinkedHashSet<>();
         boolean rootCeReached=false;
         while(!todo.isEmpty()) {
             monitor.checkCancelled();
@@ -378,9 +398,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             if(ends.containsKey(w)&&w!=active.last)return false;
             if(w==active.last) {
                 if(state.pendingCount()||
-                   code(ins,PcodeOp.BRANCHIND)!=1||
-                   code(ins,PcodeOp.CBRANCH)<1||
-                   code(ins,PcodeOp.BRANCH)!=0)return false;
+                   !nativeCeRecoverable(active,listing,p))return false;
+                reachedCeEnds.add(active.last);
                 if(state.depth()==1) {
                     rootCeReached=true;
                 } else {
@@ -473,7 +492,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                                                state.depth(),pending));
             }
         }
-        return rootCeReached;
+        return rootCeReached&&reachedCeEnds.containsAll(ends.keySet());
     }
 
     // Explicit ISA stack operations can mutate hardware PC/DO/CNTR frames
@@ -722,7 +741,10 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     // recovery and requires no firmware-specific function names or addresses.
     private static boolean balancedCountConsumer(Function f, Listing listing,
             Program p, TaskMonitor monitor) throws CancelledException {
-        if(f==null||f.isExternal()||f.hasNoReturn())return false;
+        // Ghidra's inferred hasNoReturn flag may itself be stale. For this
+        // bounded leaf, the ORIGINAL native DO, CE, immediate RTS and return
+        // P-code below are the authoritative evidence, not the cached flag.
+        if(f==null||f.isExternal())return false;
         Address entry=f.getEntryPoint();
         if(!"PM".equals(entry.getAddressSpace().getName()))return false;
         Loop counted=null;
@@ -744,7 +766,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             }
             if(text.equals("RTS")) {
                 if(returned || counted==null ||
-                   !pm(p,counted.last+1).equals(ins.getAddress()))return false;
+                   !pm(p,counted.last+1).equals(ins.getAddress())||
+                   code(ins,PcodeOp.RETURN)!=1)return false;
                 returned=true;
                 continue;
             }
@@ -964,6 +987,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
         Map<Address,Boolean> counterConsumers=new LinkedHashMap<>();
         Map<String,Boolean> callReturns=new LinkedHashMap<>();
         todo.add(new CountFlowState(l.first+1,false));
+        boolean sourceCeReached=false;
         int calls=0;
         while(!todo.isEmpty()) {
             monitor.checkCancelled();
@@ -979,7 +1003,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             // Native CE decrements the *caller's original counter*. Its own
             // nested push frame must have been consumed on all paths.
             if(w==l.last) {
-                if(state.pendingCounter())return false;
+                if(state.pendingCounter()||nativeCounterWrite(ins))return false;
+                sourceCeReached=true;
                 continue;
             }
             if(ins.toString().trim().startsWith("DO ")||
@@ -1060,7 +1085,11 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                 todo.add(new CountFlowState(to,pending));
             }
         }
-        return true;
+        // A loop whose CE is never reachable from its original DO successor
+        // cannot be classified by this proof, even when the state queue is
+        // exhausted without an explicit contradiction. Unreachable source
+        // endpoints must never be transformed into synthetic backedges.
+        return sourceCeReached;
     }
 
     private static boolean eligible(Loop l, List<Loop> all, Program p, TaskMonitor monitor)
@@ -1083,14 +1112,61 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
         Address after = pm(p, l.first + 1);
         if (!after.equals(l.begin.getFallThrough())) return false;
         Instruction last = listing.getInstructionAt(pm(p, l.last));
-        // A freshly imported codec CE is *already* represented as a counted
-        // conditional branch to the synthetic loop-start register. Its
-        // original indirect branch is precisely the source-supported case
-        // eligible for proof of a direct PM backedge; rejecting CBRANCH here
-        // incorrectly discarded every native loop. Do not rewrite endpoints
-        // that are already direct or have unexpected P-code shapes.
-        if (last == null || last.getLength() != 3 || code(last, PcodeOp.CBRANCH) < 1 ||
-            code(last, PcodeOp.BRANCHIND) != 1 || code(last, PcodeOp.BRANCH) != 0) return false;
+        // Two actual-source conditions require the same architecture rule:
+        // (a) already decoded conditional CE with an indirect hardware loop
+        //     backedge, or
+        // (b) a decoded, control-stack-neutral endpoint whose *missing* CE
+        //     context suppresses the mandatory counted-loop P-code branch.
+        // The original DO word must still encode this exact endpoint and
+        // the bounded interprocedural count flow must separately balance.
+        // Native CALL/RTS/RTI/JUMP endpoints need their own composite flow
+        // contracts; never reinterpret them as ordinary CE terminators.
+        if (last == null || last.getLength() != 3) return false;
+        boolean nativeIndirectCe=code(last,PcodeOp.CBRANCH)>=1 &&
+            code(last,PcodeOp.BRANCHIND)==1 &&
+            code(last,PcodeOp.BRANCH)==0;
+        boolean missingNativeCe=code(last,PcodeOp.BRANCHIND)==0 &&
+            code(last,PcodeOp.BRANCH)==0 &&
+            !last.getFlowType().isCall() &&
+            !last.getFlowType().isJump() &&
+            !last.getFlowType().isTerminal() &&
+            !last.getFlowType().isComputed() &&
+            !last.toString().trim().equals("RTS") &&
+            !last.toString().trim().equals("RTI") &&
+            !last.toString().trim().startsWith("DO ");
+        // A native CALL can be the very last instruction of DO..CE.
+        // Ghidra cannot represent CALL and the CE backedge with one flow
+        // enum. Its P-code must retain the ORIGINAL target and control
+        // stack behavior. Limit this extra case to a source-returning,
+        // stack-preserving callee, no stale CALL_RETURN override, and a
+        // decoded caller continuation. Other composite instructions stay
+        // UNSUPPORTED instead of receiving invented backedges.
+        boolean nativeCallCeCandidate=false;
+        if(code(last,PcodeOp.CALL)==1&&
+           code(last,PcodeOp.BRANCH)==0&&
+           code(last,PcodeOp.BRANCHIND)<=1&&
+           (last.getFlowType().isCall()||
+            "INVALID".equals(last.getFlowType().toString()))&&
+           last.toString().trim().matches("(?i)^CALL\\s+0x[0-9a-f]+$")&&
+           "NONE".equals(last.getFlowOverride().name())&&
+           owner.getBody().contains(pm(p,l.last+1))) {
+            // One native CALL can be combined with a computed CE backedge.
+            // Ghidra represents that composite flow as INVALID, not CALL.
+            // Read the exact PM target from original CALL P-code rather
+            // than relying on the incomplete instruction FlowType enum.
+            Address target=null;
+            for(PcodeOp op:last.getPcode())
+                if(op.getOpcode()==PcodeOp.CALL)
+                    target=op.getInput(0).getAddress();
+            Function provider=target!=null&&
+                "PM".equals(target.getAddressSpace().getName())?
+                p.getFunctionManager().getFunctionAt(target):null;
+            nativeCallCeCandidate=provider!=null&&!provider.isExternal()&&
+                returnsViaSharedPcStack(provider,listing,p.getFunctionManager(),
+                    new LinkedHashMap<>(),new LinkedHashSet<>(),0,monitor);
+        }
+        if(code(last,PcodeOp.CALL)>0&&!nativeCallCeCandidate)return false;
+        if(!nativeIndirectCe&&!missingNativeCe&&!nativeCallCeCandidate)return false;
         Register directContext = p.getRegister("codec_ce_direct_backedge");
         if (directContext == null) return false;
         BigInteger alreadyDirect = p.getProgramContext().getValue(directContext,
@@ -1159,8 +1235,13 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             monitor.checkCancelled();
             if (!set.intersects(pm(program, l.first), pm(program, l.last)) ||
                 !eligible(l, all, program, monitor)) continue;
-            candidates.add(new Candidate(l,
-                listing.getInstructionAt(pm(program, l.last)).getBytes()));
+            Instruction finish=listing.getInstructionAt(pm(program,l.last));
+            boolean missingCe=code(finish,PcodeOp.BRANCHIND)==0;
+            Address nativeCallTarget=null;
+            for(PcodeOp op:finish.getPcode())
+                if(op.getOpcode()==PcodeOp.CALL)
+                    nativeCallTarget=op.getInput(0).getAddress();
+            candidates.add(new Candidate(l,finish.getBytes(),missingCe,nativeCallTarget));
         }
         if (!commitChanges) {
             int nestedEnds = 0;
@@ -1179,121 +1260,191 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             log.appendMsg(getClassName(), "Too many loop owners; no automated changes");
             return true;
         }
-        // Ghidra MCP script execution owns an outer transaction. Nested
-        // endTransaction(tx, false) is NOT a reliable undo inside it; a
-        // dry-run must therefore remain truly read-only. The production
-        // pass below is atomic and gated by actual generated Analyzer C.
+        // Read-only planning never opens Ghidra transactions; a source
+        // discovery is NOT a successful C/CFG transformation.
         if (!commitChanges) {
-            log.appendMsg("Sunplus DSP native DO/CE", "Source-eligible " +
-                candidates.size() + " candidate loops in " + perOwner.size() +
-                " existing functions; read-only plan, C acceptance pending");
+            log.appendMsg("Sunplus DSP native DO/CE",
+                "Source-eligible "+candidates.size()+" native CE endpoints in "+
+                perOwner.size()+" existing owners; C acceptance pending");
             return true;
         }
-        Map<Function, String> previous = new LinkedHashMap<>();
-        Set<Function> postponedOwners = new LinkedHashSet<>();
-        DecompInterface decompiler = new DecompInterface();
-        try {
-            if (!decompiler.openProgram(program))
-                throw new IllegalStateException("Native C backend unavailable before CE recovery");
-            // One newly discovered, source-eligible DO must never erase the
-            // already proven loops of unrelated functions. A missing/unsafe
-            // original C is a per-owner UNSUPPORTED gate, not permission to
-            // recode that endpoint, and not a whole-program rejection.
-            for (Function f : perOwner.keySet()) {
-                monitor.checkCancelled();
-                try {
-                    String original = c(decompiler, f, monitor);
-                    if (original.contains("halt_baddata")) {
-                        postponedOwners.add(f);
-                        continue;
-                    }
-                    previous.put(f, original);
-                }
-                catch (CancelledException cancelled) { throw cancelled; }
-                catch (Exception unavailable) {
-                    postponedOwners.add(f);
-                    log.appendMsg(getClassName(),
-                        "UNSUPPORTED native C baseline " + f.getEntryPoint() +
-                        ": " + unavailable.getMessage());
-                }
-            }
-        }
-        finally { decompiler.dispose(); }
-        if(!postponedOwners.isEmpty()) {
-            perOwner.keySet().removeAll(postponedOwners);
-            candidates.removeIf(candidate -> postponedOwners.contains(candidate.loop.owner));
-        }
-        if(candidates.isEmpty())return true;
-        int eligibleCount = candidates.size();
-        Register ce = program.getRegister("codec_ce_loop_end");
-        Register direct = program.getRegister("codec_ce_direct_backedge");
-        Register target = program.getRegister("codec_ce_direct_start");
-        if (ce == null || direct == null || target == null) return true;
-
-        int tx = program.startTransaction("Architecture native DSP safe DO/CE recovery");
-        boolean accept = false;
-        try {
-            for (Candidate candidate : candidates) {
-                monitor.checkCancelled();
-                Loop loop = candidate.loop;
-                Address at = pm(program, loop.last);
-                listing.clearCodeUnits(at, at.add(2), false);
-                program.getProgramContext().setValue(ce, at, at, BigInteger.ONE);
-                program.getProgramContext().setValue(direct, at, at, BigInteger.ONE);
-                program.getProgramContext().setValue(target, at, at,
-                    BigInteger.valueOf(loop.first + 1));
-                DisassembleCommand cmd = new DisassembleCommand(new AddressSet(at, at.add(2)), null, true);
-                cmd.enableCodeAnalysis(false);
-                if (!cmd.applyTo(program, monitor)) throw new IllegalStateException("Native CE decode failed " + at);
-                Instruction recoded = listing.getInstructionAt(at);
-                boolean branch = false;
-                if (recoded == null || !Arrays.equals(recoded.getBytes(), candidate.endBytes))
-                    throw new IllegalStateException("Native word changed at " + at);
-                for (PcodeOp op : recoded.getPcode())
-                    if (op.getOpcode() == PcodeOp.BRANCH &&
-                        op.getInput(0).getAddress().equals(pm(program, loop.first + 1))) branch = true;
-                if (!branch || code(recoded, PcodeOp.CBRANCH) == 0)
-                    throw new IllegalStateException("Original loop edge not restored " + at);
-                // Fault-injection is restricted to a dedicated QA program
-                // folder AND an explicit worker environment flag. It proves
-                // that a real top-level Analyzer transaction can roll back
-                // after a machine instruction has already been rewritten.
-                // It cannot run on an ordinary canonical program.
-                boolean qaProgram = program.getDomainFile() != null &&
-                    program.getDomainFile().getPathname().startsWith(
-                        "/RUSH28-architecture-import-validation/");
-                if (qaProgram && "1".equals(System.getenv(
-                        "RUSH28_NATIVE_CE_ABORT_AFTER_FIRST_QA"))) {
-                    throw new IllegalStateException("QA_FAULT_INJECTED_AFTER_NATIVE_CE_RECODE");
-                }
-            }
-            DecompInterface verify = new DecompInterface();
+        Register ce=program.getRegister("codec_ce_loop_end");
+        Register direct=program.getRegister("codec_ce_direct_backedge");
+        Register target=program.getRegister("codec_ce_direct_start");
+        if(ce==null||direct==null||target==null)
+            throw new IllegalStateException("UNSUPPORTED native CE context register");
+        int sourceFunctionCount=fm.getFunctionCount();
+        int recovered=0,missing=0,rejected=0;
+        // Complete and verify one native owner at a time. A single
+        // impossible C/CFG owner must not erase proven changes to unrelated
+        // source functions. Unlike a global speculative transaction, each
+        // owner has an exact original-context and function-identity rollback.
+        for(var ownerEntry:perOwner.entrySet()) {
+            monitor.checkCancelled();
+            Function owner=ownerEntry.getKey();
+            List<Candidate> ownerCandidates=ownerEntry.getValue();
+            String before;
+            DecompInterface oldC=new DecompInterface();
             try {
-                if (!verify.openProgram(program)) throw new IllegalStateException("C backend unavailable");
-                for (var owner : perOwner.entrySet()) {
-                    String after = c(verify, owner.getKey(), monitor);
-                    String before = previous.get(owner.getKey());
-                    // The initial *indirect* CE can already show a C do-loop.
-                    // Replacing its register-indirect branch with a proven
-                    // direct PM edge must preserve, not necessarily increase,
-                    // the existing loop count. Exact direct P-code is checked
-                    // above at every newly decoded endpoint.
-                    if (after.contains("halt_baddata") ||
-                        cWarnings(after) > cWarnings(before) ||
-                        cLoops(after) < cLoops(before))
-                        throw new IllegalStateException("Native C/CFG gate failed " + owner.getKey().getEntryPoint());
-                }
+                if(!oldC.openProgram(program))
+                    throw new IllegalStateException("Original native C generator unavailable");
+                before=c(oldC,owner,monitor);
+                if(before.isBlank()||before.contains("halt_baddata"))
+                    throw new IllegalStateException(
+                        "UNSUPPORTED native owner C baseline "+owner.getEntryPoint());
+            }catch(CancelledException cancelled){throw cancelled;}
+            catch(Exception unsupported) {
+                rejected+=ownerCandidates.size();
+                log.appendMsg("Sunplus native CE",
+                    "UNSUPPORTED owner "+owner.getEntryPoint()+
+                    " C baseline: "+unsupported.getMessage());
+                continue;
+            }finally{oldC.dispose();}
+            Map<Address,List<BigInteger>> contextBefore=new LinkedHashMap<>();
+            Map<Address,String> originalFlow=new LinkedHashMap<>();
+            for(Candidate candidate:ownerCandidates) {
+                Address at=pm(program,candidate.loop.last);
+                originalFlow.put(at,nativeFlowSignature(listing.getInstructionAt(at)));
+                contextBefore.put(at,List.of(
+                    getContextOrSentinel(program,ce,at),
+                    getContextOrSentinel(program,direct,at),
+                    getContextOrSentinel(program,target,at)));
             }
-            finally { verify.dispose(); }
-            accept = true;
+            String identity=owner.getName()+"|"+owner.getBody()+"|"+
+                owner.getComment()+"|"+owner.hasNoReturn();
+            int tx=program.startTransaction(
+                "Source-native DSP DO/CE owner "+owner.getEntryPoint());
+            boolean accepted=false;
+            String failure=null;
+            try {
+                for(Candidate candidate:ownerCandidates) {
+                    monitor.checkCancelled();
+                    Address at=pm(program,candidate.loop.last);
+                    listing.clearCodeUnits(at,at.add(2),false);
+                    program.getProgramContext().setValue(ce,at,at,BigInteger.ONE);
+                    program.getProgramContext().setValue(direct,at,at,BigInteger.ONE);
+                    program.getProgramContext().setValue(target,at,at,
+                        BigInteger.valueOf(candidate.loop.first+1));
+                    DisassembleCommand decode=new DisassembleCommand(
+                        new AddressSet(at,at.add(2)),null,true);
+                    decode.enableCodeAnalysis(false);
+                    if(!decode.applyTo(program,monitor))
+                        throw new IllegalStateException("Native CE decode rejected "+at);
+                    Instruction rendered=listing.getInstructionAt(at);
+                    if(rendered==null||
+                       !Arrays.equals(rendered.getBytes(),candidate.endBytes))
+                        throw new IllegalStateException("Native CE bytes changed "+at);
+                    int correctEdges=0;
+                    for(PcodeOp op:rendered.getPcode()) {
+                        if(op.getOpcode()==PcodeOp.BRANCH&&
+                           op.getInput(0).getAddress().equals(
+                               pm(program,candidate.loop.first+1)))
+                            correctEdges++;
+                    }
+                    if(correctEdges!=1||
+                       code(rendered,PcodeOp.CBRANCH)<1||
+                       code(rendered,PcodeOp.BRANCHIND)!=0)
+                        throw new IllegalStateException(
+                            "Native DO/CE backedge missing "+at);
+                    if(candidate.nativeCallTarget!=null) {
+                        int sourceCalls=0;
+                        for(PcodeOp op:rendered.getPcode())
+                            if(op.getOpcode()==PcodeOp.CALL&&
+                               candidate.nativeCallTarget.equals(
+                                   op.getInput(0).getAddress()))
+                                sourceCalls++;
+                        if(sourceCalls!=1||code(rendered,PcodeOp.CALL)!=1)
+                            throw new IllegalStateException(
+                                "Composite native CALL target changed "+at);
+                    }
+                    boolean qa=program.getDomainFile()!=null&&
+                        program.getDomainFile().getPathname().startsWith(
+                            "/RUSH28-architecture-import-validation/");
+                    if(qa&&"1".equals(System.getenv(
+                        "RUSH28_NATIVE_CE_ABORT_AFTER_FIRST_QA")))
+                        throw new IllegalStateException(
+                            "QA_FAULT_INJECTED_AFTER_NATIVE_CE_RECODE");
+                }
+                if(fm.getFunctionCount()!=sourceFunctionCount||
+                   !identity.equals(owner.getName()+"|"+owner.getBody()+"|"+
+                       owner.getComment()+"|"+owner.hasNoReturn()))
+                    throw new IllegalStateException(
+                        "Native CE source function identity changed");
+                DecompInterface nextC=new DecompInterface();
+                try {
+                    if(!nextC.openProgram(program))
+                        throw new IllegalStateException("Updated native C unavailable");
+                    String after=c(nextC,owner,monitor);
+                    if(after.isBlank()||after.contains("halt_baddata")||
+                       cWarnings(after)>cWarnings(before)||
+                       cLoops(after)<cLoops(before))
+                        throw new IllegalStateException(
+                            "Native CE C/CFG regression "+owner.getEntryPoint());
+                }finally{nextC.dispose();}
+                accepted=true;
+            }catch(CancelledException cancelled){throw cancelled;}
+            catch(Exception unsupported){failure=unsupported.toString();}
+            finally{program.endTransaction(tx,accepted);}
+            if(!accepted) {
+                rejected+=ownerCandidates.size();
+                if(fm.getFunctionCount()!=sourceFunctionCount||
+                   !identity.equals(owner.getName()+"|"+owner.getBody()+"|"+
+                       owner.getComment()+"|"+owner.hasNoReturn()))
+                    throw new IllegalStateException(
+                        "UNSUPPORTED native CE rollback leaked owner metadata");
+                for(Candidate candidate:ownerCandidates) {
+                    Address at=pm(program,candidate.loop.last);
+                    Instruction restored=listing.getInstructionAt(at);
+                    if(restored==null||
+                       !Arrays.equals(restored.getBytes(),candidate.endBytes)||
+                       !originalFlow.get(at).equals(nativeFlowSignature(restored))||
+                       !contextBefore.get(at).equals(List.of(
+                           getContextOrSentinel(program,ce,at),
+                           getContextOrSentinel(program,direct,at),
+                           getContextOrSentinel(program,target,at))))
+                        throw new IllegalStateException(
+                            "UNSUPPORTED native CE rollback leaked P-code context "+at);
+                }
+                log.appendMsg("Sunplus DSP native DO/CE",
+                    "UNSUPPORTED owner "+owner.getEntryPoint()+
+                    " reason="+failure);
+            }else{
+                recovered+=ownerCandidates.size();
+                for(Candidate candidate:ownerCandidates)
+                    if(candidate.missingCe)missing++;
+            }
         }
-        finally { program.endTransaction(tx, accept && commitChanges); }
-        if (accept)
-            log.appendMsg("Sunplus DSP native DO/CE",
-                (commitChanges ? "Recovered " : "Proved safe, rolled back ") + eligibleCount +
-                " native loops in " + perOwner.size() + " verified functions;"+
-                " no increase in owner C warnings or loss of C loops");
+        log.appendMsg("Sunplus DSP native DO/CE",
+            "CONFIRMED_STATIC recovered="+recovered+
+            " missing_CE_context="+missing+
+            " UNSUPPORTED="+rejected+
+            " original_bytes_preserved=true verified_owner_C=true");
         return true;
+    }
+
+    // The same bytes can decode to different control flow under different
+    // SLEIGH context. Capture full original CFG + P-code for rollback
+    // comparison, not just an instruction's 24-bit source bytes.
+    private static String nativeFlowSignature(Instruction i) {
+        if(i==null)return "UNDEFINED";
+        StringBuilder proof=new StringBuilder()
+            .append(i.getFlowType()).append('|')
+            .append(i.getFlowOverride()).append('|')
+            .append(i.getFallThrough()).append('|')
+            .append(Arrays.toString(i.getFlows()));
+        for(PcodeOp op:i.getPcode())
+            proof.append('|').append(op.getOpcode()).append(':')
+                .append(Arrays.toString(op.getInputs())).append("->")
+                .append(op.getOutput());
+        return proof.toString();
+    }
+
+    // Missing context values are represented by a sentinel OUTSIDE legal
+    // nonnegative SLEIGH context bitfields, avoiding null List.of entries.
+    private static BigInteger getContextOrSentinel(Program p,Register reg,
+            Address at) {
+        BigInteger value=p.getProgramContext().getValue(reg,at,false);
+        return value==null?BigInteger.valueOf(-1):value;
     }
 
     private static String getClassName() { return "SunplusNativeCeAutoAnalyzer"; }
@@ -1344,6 +1495,38 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     }
 
     /**
+     * Production source-native nested DO/CE recovery.
+     * Only proven, bounded native nested groups are eligible. The shared
+     * transactional Ghidra C gate rejects regressions and preserves bytes.
+     * The controlled fault-injection QA path remains separate.
+     */
+    public boolean applyProvenNestedAfterSavedAnalysis(
+            Program program, TaskMonitor monitor, MessageLog log)
+            throws CancelledException {
+        if (!canAnalyze(program)) return true;
+        boolean isolatedQa = program.getDomainFile()!=null &&
+            program.getDomainFile().getPathname().startsWith(
+                "/RUSH28-architecture-import-validation/");
+        if (isolatedQa && "1".equals(System.getenv("RUSH28_NESTED_CE_QA")))
+            return true;
+        if (program.isChanged()) {
+            log.appendMsg(getClassName(), "UNSUPPORTED nested CE: unsaved program changes");
+            return false;
+        }
+        try {return recoverNestedSourceFrames(program,monitor,log,false);}
+        catch (CancelledException cancelled) {throw cancelled;}
+        catch (Exception failure) {
+            boolean rolledBack=!program.isChanged();
+            log.appendMsg(getClassName(), "UNSUPPORTED nested CE: "+
+                failure.getMessage()+" cleanAfterRollback="+rolledBack);
+            // A rollback is integrity evidence, not acceptance evidence.
+            // Never report a failed source transformation as a successful
+            // processor pass simply because the original data stayed clean.
+            return false;
+        }
+    }
+
+    /**
      * QA-only top-level two-level native CE trial. Never enabled on production
      * saved programs: full hardware shared-PC-stack semantics remain UNKNOWN.
      * This runs after the ordinary analysis transaction has been saved, and
@@ -1361,7 +1544,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
             log.appendMsg(getClassName(), "Nested QA refused unsaved program changes");
             return false;
         }
-        try {return experimentNested(program,monitor,log);}
+        try {return recoverNestedSourceFrames(program,monitor,log,true);}
         catch (CancelledException c){throw c;}
         catch (Exception e){
             log.appendMsg(getClassName(), "Nested QA rollback: "+e+
@@ -1373,8 +1556,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     private record NestedSite(Address address, byte[] source, int depth,
                               boolean end, Address expectedBackedge) {}
 
-    private static boolean experimentNested(Program program, TaskMonitor monitor,
-                                            MessageLog log) throws Exception {
+    private static boolean recoverNestedSourceFrames(Program program,
+            TaskMonitor monitor, MessageLog log, boolean qa) throws Exception {
         Listing listing=program.getListing();
         FunctionManager fm=program.getFunctionManager();
         List<Loop> loops=new ArrayList<>();
@@ -1389,7 +1572,8 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
         List<NestedGroup> groups=planarTwoLevelNested(loops,program,monitor);
         List<ThreeLevelGroup> thirdGroups=planarThreeLevelNested(loops,program,monitor);
         if (groups.isEmpty()&&thirdGroups.isEmpty()) {
-            log.appendMsg("Sunplus native nested QA", "No proven source groups; untouched");
+            log.appendMsg("Sunplus native nested "+(qa?"QA":"production"),
+                "No eligible source-proven nested groups; untouched");
             return true;
         }
         if (groups.size()+thirdGroups.size()>20)
@@ -1437,99 +1621,259 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                               true,pm(program,child.first+1));
             }
         }
+        Map<Function,String> identities=new LinkedHashMap<>();
+        for(Function f:previous.keySet())
+            identities.put(f,f.getName()+"|"+f.getBody()+"|"+
+                f.hasNoReturn()+"|"+f.getComment());
+        Set<Function> missingBaselineOwners=new LinkedHashSet<>();
         DecompInterface generator=new DecompInterface();
         try {
-            if (!generator.openProgram(program))throw new IllegalStateException("Nested QA C unavailable");
+            if (!generator.openProgram(program))
+                throw new IllegalStateException("Nested C unavailable");
             for (Function f:previous.keySet()) {
-                String baseline=c(generator,f,monitor);
-                if (baseline.contains("halt_baddata"))throw new IllegalStateException("Bad native baseline C "+f.getEntryPoint());
-                previous.put(f,baseline);
+                monitor.checkCancelled();
+                try {
+                    String baseline=c(generator,f,monitor);
+                    if (baseline.isBlank() || baseline.contains("halt_baddata"))
+                        throw new IllegalStateException(
+                            "UNSUPPORTED native baseline C "+f.getEntryPoint());
+                    previous.put(f,baseline);
+                }catch(CancelledException cancelled){throw cancelled;}
+                catch(Exception unavailable) {
+                    if(qa)throw unavailable;
+                    missingBaselineOwners.add(f);
+                    log.appendMsg("Sunplus nested source production",
+                        "UNSUPPORTED native owner C baseline "+
+                        f.getEntryPoint()+": "+unavailable.getMessage());
+                }
             }
         }finally{generator.dispose();}
+        int originalFunctions=fm.getFunctionCount();
+        if(qa) {
+            // Private fault-injection QA intentionally preserves one original
+            // all-or-nothing transaction for rollback verification.
+            int tx=program.startTransaction("QA native source nested DO/CE atomic trial");
+            boolean accept=false;
+            try {
+                rewriteNestedSites(program,sites,monitor,true);
+                verifyNestedOwners(program,previous,identities,originalFunctions,monitor);
+                accept=true;
+            }finally{program.endTransaction(tx,accept);}
+        } else {
+            // Native owner is the atomic update boundary. One anomalous
+            // DSP function must not veto otherwise source-proven nested
+            // groups in unrelated functions. Bounded owner-level work also
+            // avoids building one huge speculative C graph in Ghidra.
+            Map<Function,Map<Address,NestedSite>> byOwner=new LinkedHashMap<>();
+            for(NestedSite site:sites.values()) {
+                Function owner=fm.getFunctionContaining(site.address);
+                if(owner==null||!previous.containsKey(owner))
+                    throw new IllegalStateException(
+                        "UNSUPPORTED nested site without proven owner "+site.address);
+                byOwner.computeIfAbsent(owner,ignored->new LinkedHashMap<>())
+                    .put(site.address,site);
+            }
+            int acceptedOwners=0,rejectedOwners=0,acceptedEndpoints=0;
+            for(var row:byOwner.entrySet()) {
+                monitor.checkCancelled();
+                Function owner=row.getKey();
+                if(missingBaselineOwners.contains(owner)) {
+                    rejectedOwners++;
+                    continue;
+                }
+                Map<Address,List<BigInteger>> sourceContexts=
+                    snapshotNativeNestedContexts(program,row.getValue());
+                Map<Address,String> originalFlows=new LinkedHashMap<>();
+                for(NestedSite site:row.getValue().values())
+                    originalFlows.put(site.address,nativeFlowSignature(
+                        listing.getInstructionAt(site.address)));
+                int tx=program.startTransaction(
+                    "Architecture native nested CE owner "+owner.getEntryPoint());
+                boolean accept=false;
+                String problem=null;
+                try {
+                    rewriteNestedSites(program,row.getValue(),monitor,false);
+                    verifyNestedOwners(program,
+                        java.util.Collections.singletonMap(owner,previous.get(owner)),
+                        java.util.Collections.singletonMap(owner,identities.get(owner)),
+                        originalFunctions,monitor);
+                    accept=true;
+                }catch(CancelledException cancelled){throw cancelled;}
+                catch(Exception unsupported){problem=unsupported.toString();}
+                finally{program.endTransaction(tx,accept);}
+                if(!accept) {
+                    assertNestedSourceRollback(program,row.getValue(),
+                        sourceContexts,originalFlows);
+                    if(fm.getFunctionCount()!=originalFunctions||
+                       !identities.get(owner).equals(
+                           owner.getName()+"|"+owner.getBody()+"|"+
+                           owner.hasNoReturn()+"|"+owner.getComment()))
+                        throw new IllegalStateException(
+                            "UNSUPPORTED nested owner rollback leaked function identity");
+                }
+                if(accept) {
+                    acceptedOwners++;
+                    for(NestedSite site:row.getValue().values())
+                        if(site.end)acceptedEndpoints++;
+                } else {
+                    rejectedOwners++;
+                    log.appendMsg("Sunplus nested source production",
+                        "UNSUPPORTED owner "+owner.getEntryPoint()+
+                        " rollback="+problem);
+                }
+            }
+            log.appendMsg("Sunplus nested source production",
+                "CONFIRMED_STATIC owner_transactions="+acceptedOwners+
+                " recovered_CE="+acceptedEndpoints+
+                " UNSUPPORTED_owner_transactions="+rejectedOwners+
+                " source_bytes_checked=true C_nonregression_per_owner=true"+
+                " hardware shared-PC-stack proof UNKNOWN");
+            return true;
+        }
+        int recovered=0;
+        for(NestedGroup group:groups) recovered+=group.inner.size()+1;
+        for(ThreeLevelGroup group:thirdGroups)recovered+=group.inner.size()+2;
+        log.appendMsg("Sunplus nested source QA",
+            "Recovered "+recovered+" static depth<=3 endpoints in "+
+            (groups.size()+thirdGroups.size())+" groups (triple="+
+            thirdGroups.size()+"); source bytes, identities and C checked;"+
+            " hardware shared-PC-stack proof UNKNOWN");
+        return true;
+    }
+
+    /**
+     * Owner-local rollback must restore analysis context, not just preserve
+     * firmware bytes. A recoded instruction can have identical source bytes
+     * yet different P-code because its contextual CE flags leaked.
+     */
+    private static Map<Address,List<BigInteger>> snapshotNativeNestedContexts(
+            Program program,Map<Address,NestedSite> sites) {
+        Map<Address,List<BigInteger>> context=new LinkedHashMap<>();
+        String[] names={"codec_ce_nested_mode","codec_ce_static_depth",
+                        "codec_ce_loop_end","codec_ce_direct_backedge",
+                        "codec_ce_direct_start","codec_ce_counter14"};
+        for(NestedSite site:sites.values()) {
+            List<BigInteger> values=new ArrayList<>();
+            for(String name:names) {
+                Register register=program.getRegister(name);
+                if(register==null)
+                    throw new IllegalStateException("UNSUPPORTED nested context "+name);
+                values.add(program.getProgramContext().getValue(
+                    register,site.address,false));
+            }
+            context.put(site.address,values);
+        }
+        return context;
+    }
+
+    private static void assertNestedSourceRollback(Program program,
+            Map<Address,NestedSite> sites,
+            Map<Address,List<BigInteger>> before,
+            Map<Address,String> originalFlows) throws Exception {
+        Map<Address,List<BigInteger>> after=
+            snapshotNativeNestedContexts(program,sites);
+        if(!before.equals(after))
+            throw new IllegalStateException(
+                "UNSUPPORTED nested owner rollback leaked processor context");
+        for(NestedSite site:sites.values()) {
+            Instruction restored=program.getListing().getInstructionAt(site.address);
+            if(restored==null||
+               !Arrays.equals(restored.getBytes(),site.source)||
+               !originalFlows.get(site.address).equals(nativeFlowSignature(restored)))
+                throw new IllegalStateException(
+                    "UNSUPPORTED nested owner rollback changed source/CFG at "+site.address);
+        }
+    }
+
+    private static void rewriteNestedSites(Program program,
+            Map<Address,NestedSite> sites,TaskMonitor monitor,boolean qa)
+            throws Exception {
+        Listing listing=program.getListing();
         Register nested=program.getRegister("codec_ce_nested_mode");
         Register depth=program.getRegister("codec_ce_static_depth");
         Register ce=program.getRegister("codec_ce_loop_end");
         Register direct=program.getRegister("codec_ce_direct_backedge");
         Register dest=program.getRegister("codec_ce_direct_start");
         Register counter14=program.getRegister("codec_ce_counter14");
-        if (nested==null||depth==null||ce==null||direct==null||dest==null||counter14==null)
-            throw new IllegalStateException("Native SLEIGH static counter contexts absent");
-        int originalFunctions=fm.getFunctionCount();
-        int tx=program.startTransaction("QA native source two-level static DO/CE atomic trial");
-        boolean accept=false;
+        if(nested==null||depth==null||ce==null||direct==null||
+           dest==null||counter14==null)
+            throw new IllegalStateException("Native nested context registers absent");
+        for(NestedSite site:sites.values()) {
+            monitor.checkCancelled();
+            Instruction original=listing.getInstructionAt(site.address);
+            boolean sourceCounterWriter=staticCounterWriter(original);
+            listing.clearCodeUnits(site.address,site.address.add(2),false);
+            program.getProgramContext().setValue(nested,site.address,site.address,BigInteger.ONE);
+            program.getProgramContext().setValue(depth,site.address,site.address,
+                BigInteger.valueOf(site.depth));
+            if (site.end || sourceCounterWriter)
+                program.getProgramContext().setValue(counter14,site.address,site.address,BigInteger.ONE);
+            if(site.end) {
+                program.getProgramContext().setValue(ce,site.address,site.address,BigInteger.ONE);
+                program.getProgramContext().setValue(direct,site.address,site.address,BigInteger.ONE);
+                program.getProgramContext().setValue(dest,site.address,site.address,
+                    BigInteger.valueOf(word(site.expectedBackedge)));
+            }
+        }
+        boolean firstNestedRecode=true;
+        for(NestedSite site:sites.values()) {
+            monitor.checkCancelled();
+            DisassembleCommand command=new DisassembleCommand(
+                new AddressSet(site.address,site.address.add(2)),null,true);
+            command.enableCodeAnalysis(false);
+            if(!command.applyTo(program,monitor))
+                throw new IllegalStateException("Native nested decode failed at "+site.address);
+            Instruction rendered=listing.getInstructionAt(site.address);
+            if(rendered==null||!Arrays.equals(site.source,rendered.getBytes()))
+                throw new IllegalStateException("Native nested source bytes differ at "+site.address);
+            if(firstNestedRecode) {
+                firstNestedRecode=false;
+                if(qa && "1".equals(System.getenv("RUSH28_NESTED_CE_ABORT_AFTER_FIRST_QA")))
+                    throw new IllegalStateException("QA_FAULT_INJECTED_AFTER_NESTED_RECODE");
+            }
+            if(site.end) {
+                int directEdges=0;
+                for(PcodeOp op:rendered.getPcode())
+                    if(op.getOpcode()==PcodeOp.BRANCH&&
+                       site.expectedBackedge.equals(op.getInput(0).getAddress()))
+                        directEdges++;
+                if(directEdges!=1||code(rendered,PcodeOp.CBRANCH)==0||
+                   code(rendered,PcodeOp.BRANCHIND)!=0)
+                    throw new IllegalStateException(
+                        "Source nested CE backedge absent at "+site.address);
+            }
+        }
+    }
+
+    private static void verifyNestedOwners(Program program,
+            Map<Function,String> previous,Map<Function,String> identities,
+            int originalFunctions,TaskMonitor monitor)throws Exception {
+        if(program.getFunctionManager().getFunctionCount()!=originalFunctions)
+            throw new IllegalStateException("Nested recovery changed function inventory");
+        for(var original:identities.entrySet()) {
+            Function f=original.getKey();
+            String now=f.getName()+"|"+f.getBody()+"|"+
+                f.hasNoReturn()+"|"+f.getComment();
+            if(!original.getValue().equals(now))
+                throw new IllegalStateException(
+                    "Nested recovery altered owner identity "+f.getEntryPoint());
+        }
+        DecompInterface verify=new DecompInterface();
         try {
-            for (NestedSite site:sites.values()) {
+            if(!verify.openProgram(program))
+                throw new IllegalStateException("Native nested updated C unavailable");
+            for(var entry:previous.entrySet()) {
                 monitor.checkCancelled();
-                // Capture native counter-writer provenance before clearing
-                // the instruction. Looking it up after clearCodeUnits can
-                // erase precisely the evidence needed for 14-bit CNTR width.
-                Instruction original=listing.getInstructionAt(site.address);
-                boolean sourceCounterWriter=staticCounterWriter(original);
-                listing.clearCodeUnits(site.address,site.address.add(2),false);
-                program.getProgramContext().setValue(nested,site.address,site.address,BigInteger.ONE);
-                program.getProgramContext().setValue(depth,site.address,site.address,
-                    BigInteger.valueOf(site.depth));
-                if (site.end || sourceCounterWriter) {
-                    // Scoped QA-only 14-bit CNTR architecture width on both
-                    // original inner counter writers and each decoded CE.
-                    program.getProgramContext().setValue(counter14,site.address,site.address,BigInteger.ONE);
-                }
-                if (site.end) {
-                    program.getProgramContext().setValue(ce,site.address,site.address,BigInteger.ONE);
-                    program.getProgramContext().setValue(direct,site.address,site.address,BigInteger.ONE);
-                    program.getProgramContext().setValue(dest,site.address,site.address,
-                        BigInteger.valueOf(word(site.expectedBackedge)));
-                }
+                String after=c(verify,entry.getKey(),monitor);
+                String before=entry.getValue();
+                if(after.isBlank()||after.contains("halt_baddata")||
+                   cWarnings(after)>cWarnings(before)||
+                   cLoops(after)<cLoops(before))
+                    throw new IllegalStateException(
+                        "Native nested C nonregression failed at "+
+                        entry.getKey().getEntryPoint());
             }
-            boolean firstNestedRecode = true;
-            for (NestedSite site:sites.values()) {
-                monitor.checkCancelled();
-                DisassembleCommand command=new DisassembleCommand(
-                    new AddressSet(site.address,site.address.add(2)),null,true);
-                command.enableCodeAnalysis(false);
-                if(!command.applyTo(program,monitor))throw new IllegalStateException("Native nested decode failed at "+site.address);
-                Instruction rendered=listing.getInstructionAt(site.address);
-                if(rendered==null || !Arrays.equals(site.source,rendered.getBytes()))
-                    throw new IllegalStateException("Native nested machine bytes differ at "+site.address);
-                if (firstNestedRecode) {
-                    firstNestedRecode=false;
-                    if ("1".equals(System.getenv("RUSH28_NESTED_CE_ABORT_AFTER_FIRST_QA")))
-                        throw new IllegalStateException("QA_FAULT_INJECTED_AFTER_NESTED_RECODE");
-                }
-                if (site.end) {
-                    int matches=0;
-                    for(PcodeOp op:rendered.getPcode())
-                        if(op.getOpcode()==PcodeOp.BRANCH &&
-                           site.expectedBackedge.equals(op.getInput(0).getAddress())) matches++;
-                    if(matches!=1 || code(rendered,PcodeOp.CBRANCH)==0 ||
-                       code(rendered,PcodeOp.BRANCHIND)!=0)
-                        throw new IllegalStateException("Source nested CE backedge absent at "+site.address);
-                }
-            }
-            if(fm.getFunctionCount()!=originalFunctions)
-                throw new IllegalStateException("Nested trial changed native function inventory");
-            DecompInterface verify=new DecompInterface();
-            try {
-                if (!verify.openProgram(program))throw new IllegalStateException("Nested QA updated C unavailable");
-                for(var entry:previous.entrySet()){
-                    String after=c(verify,entry.getKey(),monitor);
-                    String before=entry.getValue();
-                    if(after.contains("halt_baddata") || cWarnings(after)>cWarnings(before) ||
-                        cLoops(after)<cLoops(before))
-                        throw new IllegalStateException("Nested QA C nonregression failed at "+
-                            entry.getKey().getEntryPoint());
-                }
-            }finally{verify.dispose();}
-            accept=true;
-        }finally{program.endTransaction(tx,accept);}
-        int recovered=0;
-        for(NestedGroup group:groups) recovered+=group.inner.size()+1;
-        for(ThreeLevelGroup group:thirdGroups)recovered+=group.inner.size()+2;
-        log.appendMsg("Sunplus nested source QA", "Recovered "+recovered+
-            " static depth<=3 endpoints in "+(groups.size()+thirdGroups.size())+
-            " groups (triple="+thirdGroups.size()+"); source bytes and C checked;"+
-            " hardware shared-PC-stack proof UNKNOWN");
-        return true;
+        }finally{verify.dispose();}
     }
 
     private static void addNestedSite(Map<Address,NestedSite> target,Instruction instruction,

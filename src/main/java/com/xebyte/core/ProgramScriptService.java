@@ -165,6 +165,35 @@ public class ProgramScriptService {
                 persistProgram(program,"Sunplus DSP source-native shared continuation verified");
             if(!sharedOwnerEvidence.toString().isBlank())
                 Msg.info(this,"Sunplus shared native continuation evidence: "+sharedOwnerEvidence);
+            // Native CALL_RETURN metadata is not itself part of the ISA.
+            // Restore proven ordinary CALL continuations independently;
+            // composite CALL+CE remains reserved for the next atomic pass.
+            MessageLog ordinaryCallEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeReturningCallCeRecovery
+                    .applyPlainReturningCallsAfterSavedAnalysis(program,
+                        ghidra.util.task.TaskMonitor.DUMMY,ordinaryCallEvidence)){
+                Msg.warn(this,"Sunplus native ordinary returning CALL rejected: "+
+                    ordinaryCallEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source returning native CALL metadata");
+            if(!ordinaryCallEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus ordinary native CALL continuation: "+
+                    ordinaryCallEvidence);
+            // Native returning CALL and its immediately following CE must
+            // be corrected atomically, before ordinary CE recovery.
+            MessageLog returningCeEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeReturningCallCeRecovery
+                    .applyAfterSavedAnalysis(program,
+                        ghidra.util.task.TaskMonitor.DUMMY,returningCeEvidence)){
+                Msg.warn(this,"Sunplus returning CALL/CE recovery rejected: "+returningCeEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP atomic returning CALL/CE");
+            if(!returningCeEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus returning CALL/CE: "+returningCeEvidence);
             var nativeCe = new com.xebyte.sunplus.SunplusNativeCeAutoAnalyzer();
             MessageLog evidence = new MessageLog();
             if (!nativeCe.applyAfterSavedAnalysis(program,
@@ -197,6 +226,21 @@ public class ProgramScriptService {
                     Msg.info(this, "Sunplus DSP residual DM16 evidence: " + residual);
                 }
             }
+            // Production depth<=3 native loop recovery: only source-proven
+            // groups accepted by an atomic generated-C nonregression gate.
+            MessageLog productionNestedEvidence = new MessageLog();
+            if(!nativeCe.applyProvenNestedAfterSavedAnalysis(program,
+                    ghidra.util.task.TaskMonitor.DUMMY,productionNestedEvidence)){
+                Msg.warn(this,"Sunplus native nested production rejected: "+
+                    productionNestedEvidence);
+                return false;
+            }
+            boolean productionNestedChanged=program.isChanged();
+            if(productionNestedChanged)
+                persistProgram(program,"Sunplus DSP native nested CE architecture recovery");
+            if(!productionNestedEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus native nested production: "+
+                    productionNestedEvidence);
             // Experimental processor behavior only in the private QA folder
             // with an explicit worker opt-in. It never runs on a canonical
             // program until exact machine and C readback acceptance is proven.
@@ -216,7 +260,10 @@ public class ProgramScriptService {
                 persistProgram(program,"Sunplus DSP source-native two-level QA experiment");
             if(!nestedEvidence.toString().isBlank())
                 Msg.info(this,"Sunplus DSP nested QA evidence: "+nestedEvidence);
-            if(nestedChanged) {
+            // Both native production and isolated QA nested CE rewrites can
+            // expose previously hidden DM16 cell references. Normalization
+            // is required after EITHER accepted source rewrite, not QA only.
+            if(productionNestedChanged || nestedChanged) {
                 for(int nestedDmPass=0;nestedDmPass<2;nestedDmPass++) {
                     MessageLog postNestedDm=new MessageLog();
                     if(!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer.applyAfterSavedAnalysis(
@@ -230,6 +277,74 @@ public class ProgramScriptService {
                     if(!postNestedDm.toString().isBlank())
                         Msg.info(this,"Sunplus DSP post-nested DM16 evidence: "+postNestedDm);
                 }
+            }
+            // A bounded SECOND native ownership convergence follows the
+            // combined CALL+CE and nested CE passes: new source-backed PM
+            // continuations may become visible only after the first owner
+            // census. The first pass before CE remains necessary to provide
+            // the owners against which CE/C can be safely proven.
+            // Do not repeatedly recreate functions or infer ownership from
+            // a warning; apply only the ordinary guarded source-native flow
+            // contract and persist accepted changes.
+            MessageLog finalOwnerEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeFlowOwnerRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,finalOwnerEvidence)){
+                Msg.warn(this,"Sunplus final native owner convergence rejected: "+
+                    finalOwnerEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP final source-native PM ownership convergence");
+            if(!finalOwnerEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus final source-native owner evidence: "+
+                    finalOwnerEvidence);
+            // A second owner census may expose a previously unowned,
+            // source-encoded CALL successor. Reuse the identical guarded
+            // metadata rule once, then save its accepted native C.
+            MessageLog lateCallEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeReturningCallCeRecovery
+                    .applyPlainReturningCallsAfterSavedAnalysis(program,
+                        ghidra.util.task.TaskMonitor.DUMMY,lateCallEvidence)){
+                Msg.warn(this,"Sunplus late native CALL metadata rejected: "+lateCallEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP late proven native CALL continuations");
+            if(!lateCallEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus late native CALL evidence: "+lateCallEvidence);
+            // A bounded final source-native CE pass is necessary AFTER
+            // second-pass function ownership and native CALL_RETURN repairs.
+            // Earlier CE candidates may have been correctly rejected only
+            // because their source function or CALL continuation was not yet
+            // owned. Reusing the generic model once avoids address-specific
+            // scripts, while owner-atomic C acceptance prevents regression.
+            MessageLog lateCeEvidence=new MessageLog();
+            if(!nativeCe.applyAfterSavedAnalysis(program,
+                    ghidra.util.task.TaskMonitor.DUMMY,lateCeEvidence)){
+                Msg.warn(this,"Sunplus final native CE convergence rejected: "+
+                    lateCeEvidence);
+                return false;
+            }
+            boolean lateCeChanged=program.isChanged();
+            if(lateCeChanged)
+                persistProgram(program,"Sunplus DSP final source-native CE convergence");
+            if(!lateCeEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus final native CE evidence: "+lateCeEvidence);
+            if(lateCeChanged) {
+                // Only a successful native CE recode can reveal additional
+                // concrete DM16 references; do not force unrelated passes.
+                MessageLog lastDmEvidence=new MessageLog();
+                if(!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer
+                        .applyAfterSavedAnalysis(program,
+                            ghidra.util.task.TaskMonitor.DUMMY,lastDmEvidence)){
+                    Msg.warn(this,"Sunplus final CE DM16 normalization rejected: "+
+                        lastDmEvidence);
+                    return false;
+                }
+                if(program.isChanged())
+                    persistProgram(program,"Sunplus DSP final native CE DM16 convergence");
+                if(!lastDmEvidence.toString().isBlank())
+                    Msg.info(this,"Sunplus final native CE DM16: "+lastDmEvidence);
             }
             // A native DM polling loop must preserve the observable memory
             // access even if the source C optimizer otherwise removes its
