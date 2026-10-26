@@ -4,6 +4,20 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## RUSH31 native Sunplus DSP automatic recovery (2026-10-27)
+
+- Promote source-proven nested depth <= 3 DO/CE, missing CE context and combined
+  CALL+CE machine instruction recovery to production post-analysis handling.
+- Restore false CALL_RETURN/no-return only with original RTS control evidence,
+  verified direct caller C and owner-local atomic rollback.
+- Complete bounded PM ownership, DM16 and CE convergence; reject all native
+  source/CFG/C regressions and preserve the protected QA injection mode.
+- **Fresh local Ghidra 12.1.3 acceptance:** four original DSP module imports,
+  **547/547 generated C**, **548/548 direct DO/CE**, **0 C warnings**,
+  and project save/reopen. Original bytes unchanged; Ghidra worker closed.
+- Canonical **565-function** saved Analyzer project acceptance and silicon
+  execution equivalence are **not yet verified**. See MODEL_RELEASE.json.
+
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
 ### Sunplus SPHE audio-DSP: processor model and vector-handler tools (source candidate)

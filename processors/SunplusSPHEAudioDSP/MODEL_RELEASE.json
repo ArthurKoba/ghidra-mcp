@@ -15,7 +15,42 @@
   "gate": "Do not mark canonical or duplicate into HD Audio Rush until Analyzer MCP production readback accepts the installed native/SLEIGH model and saved firmware programs.",
   "language_definition_version": "0.1",
   "language_id": "SunplusSPHEAudioDSP:BE:16:default",
-  "release": "sunplus-sphe8202r-dsp-rush30-20261026",
+  "latest_local_source_native_20261026": {
+    "C_warning_lines": 0,
+    "canonical_save_readback": "PENDING",
+    "program_image_profiles": 4,
+    "silicon_execution": "UNKNOWN",
+    "source_native_CALL_rooted": 1339,
+    "source_native_DO_CE_count": 548,
+    "source_native_function_C_failed": 0,
+    "source_native_function_C_generated": 547,
+    "source_programs_changed": 0,
+    "source_vector_handler_paths_checked": 4,
+    "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING",
+    "vector_handler_paths_RTI_complete": 4
+  },
+  "latest_local_source_native_20261027": {
+    "C_failed": 0,
+    "C_warning_lines": 0,
+    "Ghidra": "12.1.3",
+    "canonical_native_function_scope": 565,
+    "canonical_validation": "PENDING_INSTALLED_MODEL_565_NATIVE_FUNCTION_REGENERATION",
+    "confirmed_composite_CALL_CE": 1,
+    "fresh_original_source_profiles": 4,
+    "indirect_CE": 0,
+    "language": "SunplusSPHEAudioDSP:BE:16:default",
+    "local_Ghidra_workers_left_running": 0,
+    "processor_bundle_sla_sha256": "b8bc249a835066645ee8244c3572578009418e35ae5977e9e4b77a35f12e22a9",
+    "runtime_jar_sha256": "4d93abdd7f0b8a0b7a017a5f1496fb4efbbd429730e286adf40fcbac91a79a0b",
+    "saved_and_reopened_C_ok": 547,
+    "silicon_execution": "UNKNOWN",
+    "source_bytes_changed": 0,
+    "source_native_DO_CE": 548,
+    "source_native_direct_CE": 548,
+    "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING",
+    "unresolved_composite_native_flows": 0
+  },
+  "release": "sunplus-sphe8202r-dsp-rush31-20261027",
   "reproducible_local": {
     "CE_indirect_proven": 58,
     "CE_native": 426,
@@ -27,21 +62,7 @@
     "stack_checks": 40017,
     "stack_instruction_executions": 72791
   },
-  "schema": "sunplus-dsp-model-release-1",
-  "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING",
   "reproducible_local_historical_scope": "RUSH26 2026-10-23 checkpoint; figures retained for comparison and are not new snapshot totals",
-  "latest_local_source_native_20261026": {
-    "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING",
-    "program_image_profiles": 4,
-    "source_native_function_C_generated": 547,
-    "source_native_function_C_failed": 0,
-    "source_native_DO_CE_count": 548,
-    "source_native_CALL_rooted": 1339,
-    "C_warning_lines": 0,
-    "vector_handler_paths_RTI_complete": 4,
-    "source_vector_handler_paths_checked": 4,
-    "source_programs_changed": 0,
-    "silicon_execution": "UNKNOWN",
-    "canonical_save_readback": "PENDING"
-  }
+  "schema": "sunplus-dsp-model-release-1",
+  "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING"
 }
