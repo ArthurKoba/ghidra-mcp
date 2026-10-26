@@ -6,6 +6,26 @@ Complete version history for the Ghidra MCP Server project.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
+### Sunplus SPHE audio-DSP: processor model and vector-handler tools (source candidate)
+
+- Preserve the 14-bit native counted-loop semantics, opt-in shared PC/loop/status
+  sequencer, native function/DM/flow recovery, and the source-derived compound
+  CALL + CE behavior contract. Extend post-analysis orchestration without
+  introducing address-specific source-code substitutions.
+- Add reproducible original-source vector and handler GhidraScript tools,
+  including software-stimulated MMIO/status handshakes. The scripts execute
+  original program instructions in an isolated P-code emulator; they do not
+  patch firmware bytes or establish physical interrupt wiring.
+- Local, scoped Ghidra 12.1.3 evidence for PCM/AUX/DTS/AC-3: all four selected
+  PM vector-handler paths reached RTI with restored PC/status frames using
+  modeled external input transitions. Earlier local source analysis generated
+  547/547 C functions, restored 548/548 native DO/CE sites, and emitted zero
+  C warning lines. These are distinct coverage denominators, not 100% of
+  processor semantics or a production canonical Analyzer acceptance.
+- Canonical Analyzer saved/read-back verification and hardware comparisons
+  remain separate gates. See docs/sunplus-dsp-native-model.md.
+
+
 ### Sunplus SPHE8202R DSP: reproducible local model release candidate
 
 - Package the native Ghidra 12.1.3 C-generator repairs alongside the opt-in

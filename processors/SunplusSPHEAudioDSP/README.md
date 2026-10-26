@@ -390,3 +390,72 @@ updates, save and independent readback.
 
 Architecture-derived preparation passes and explicit safety/assembler limits:
 see docs/project-management/SUNPLUS_DSP_ARCHITECTURE_RECOVERY.md.
+
+## RUSH 28 — automatic native CE recovery, integration gate (2026-10-24)
+
+The architecture-level analyzer is implemented at
+`src/main/java/com/xebyte/sunplus/SunplusNativeCeAutoAnalyzer.java` and is
+registered with Ghidra as **Sunplus DSP Native DO/CE Flow**. It discovers
+source-encoded 24-bit `DO ... UNTIL CE` endpoints, verifies a bounded upstream
+CNTR writer, rejects overlapping/nested loop intervals, checks native direct
+flow and leaf callees, and can recode proven CE endpoints while regenerating
+Analyzer C for affected existing functions. No addresses, program names, or
+firmware hashes are built into this rule. The resident wrapper has a separate
+context contract.
+
+**Release gate:** The analyzer is **discoverable but disabled by default**.
+Ghidra MCP scripts can own an outer transaction; ending a nested transaction
+with `commit=false` does not necessarily restore in-memory program state.
+Thus automatic mutation must not be enabled for fresh imports until a
+throwaway source-backed import validates failure rollback and saved/read-back
+behavior in the actual Analyzer lifecycle. `dryRun` is strictly read-only,
+not a speculative write-and-rollback. A failure of the native C gate must not
+silently alter a user's program. The opt-in processor software-stack view
+remains separately executable and does not imply silicon/runtime proof.
+
+Local integration: the new analyzer was discovered by Ghidra on all five saved
+modules, built with the installed Ghidra 12.1.3 SDK. A single broad
+read-only MCP job visited all five original saved program images without
+changing firmware bytes, function ownership, or native CE metadata. Generic
+source-eligible work was identified in PCM (16 loops, 8 owners) and AUX
+(2 loops, 2 owners); DTS and AC-3 had no newly eligible basic loops after
+previous saved recovery. The accepted saved native C corpus remains
+510/510, with 0 warnings, and the normalized Pcode corpus is
+29,214/29,214 with 0 discrepancies. These are **known-function and
+already-decoded instruction scopes**, not complete ISA/semantic coverage.
+
+Next release gates are: an isolated source-backed fresh import; one batch
+processor auto-analysis pass; compare exact machine-byte identity and new
+Analyzer C/Pcode with the independently accepted corpus; validate negative
+cases (nested unknowns, computed flow, callee CNTR side effects, and failed
+C generation); save/close/reopen readback; then explicitly enable automatic
+recovery and move to the canonical Analyzer project. Existing independent
+Java checks become regression tools, not a series of mandatory manual repairs.
+
+### Fresh-import ABI acceptance (RUSH 28)
+
+A clean, source-identical `srvdsp.bin` fixture was imported through the **actual
+Analyzer MCP `/import_file` endpoint with `auto_analyze=true`**, into a
+temporary folder within the existing saved local Ghidra project. The native
+import/postprocessor recovered base `PM:1800` and all **9 original executable
+handlers**. Before the fix, Analyzer C generated for all nine but every
+function carried `Unknown calling convention -- yet parameter storage is
+locked`: freshly created handlers used calling convention `unknown`, while
+the compiler specification and previously accepted program used `default`.
+
+`SunplusSrvdspPostProcessor.prepare()` now assigns the compiler spec's
+native default convention only to analysis-owned functions with `unknown`
+convention, **before** setting the `void` return type. It does not touch
+`USER_DEFINED` signatures. A second independently imported copy of the
+identical 1,128-byte executable image generated **9/9 non-empty Analyzer C
+functions with zero warning lines** and **149/149 normalized native P-code
+instructions matching the currently installed SLEIGH decoder**. This is a
+real fresh-import regression test, not replayed/synthetic C.
+
+The two QA program copies were explicitly deleted after validation and the
+five original DSP programs were read back in the single local Ghidra project.
+The raw source, generated independent C/P-code reports, backup extension jar,
+and monitored-job logs remain as test artifacts. The generic `DO/CE`
+auto-analyzer stays *disabled by default* until automatic C-failure rollback
+and fresh native codec-profile import (beyond the resident fixture) pass.
+Hardware equivalence is not claimed.

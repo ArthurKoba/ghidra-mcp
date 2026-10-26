@@ -4,6 +4,8 @@
 //
 // Default: audit (read only). To mutate an ISOLATED and backed-up program,
 // call with: -postScript SunplusDSPStructuralRecovery.java apply-safe
+// apply-safe-partial accepts only owners/intervals disjoint from invalid native DO ranges,
+// preserving unsupported owners as evidence and verifying the entire native C corpus.
 // Any failed invariant, decompilation, or C improvement rolls back the entire
 // program transaction. Unsupported loops stay UNKNOWN; never fabricate edges.
 import ghidra.app.script.GhidraScript;
@@ -167,8 +169,20 @@ public class SunplusDSPStructuralRecovery extends GhidraScript {
     throw new IllegalStateException("Not Sunplus SPHE Audio DSP");
   String[] args=getScriptArgs();
   String mode=args.length==0?"audit":args[0];
-  if(args.length>1||(!mode.equals("audit")&&!mode.equals("apply-safe")))
-    throw new IllegalArgumentException("audit (default) or apply-safe on an isolated saved GZF");
+  boolean partial=mode.equals("apply-safe-partial");
+  if(args.length>2 || (args.length==2 && !partial) ||
+     (!mode.equals("audit")&&!mode.equals("apply-safe")&&!partial))
+    throw new IllegalArgumentException("audit | apply-safe | apply-safe-partial [exclude=PM:xxxx,...] on isolated GZF");
+  Set<String> manuallyExcluded=new LinkedHashSet<>();
+  if(args.length==2){
+    if(!args[1].startsWith("exclude="))throw new IllegalArgumentException("Expected exclude=PM:xxxx,...");
+    String csv=args[1].substring("exclude=".length());
+    if(csv.isBlank())throw new IllegalArgumentException("Empty exclude list");
+    for(String part:csv.split(",")){
+      if(!part.matches("(?i)PM:[0-9a-f]{4}"))throw new IllegalArgumentException("Invalid function identity "+part);
+      if(!manuallyExcluded.add(part.toUpperCase(Locale.ROOT)))throw new IllegalArgumentException("Duplicate exclusion "+part);
+    }
+  }
   // The resident wrapper has a different, image-scoped processing contract.
   // It must never be rewritten by the generic codec analyzer.
   if("srvdsp.bin".equals(currentProgram.getName()))
@@ -190,14 +204,65 @@ public class SunplusDSPStructuralRecovery extends GhidraScript {
     " eligible_owners="+proposed.size()+" mode="+mode);
   if(mode.equals("audit")){println("DSP_MODEL_AUDIT_PASS");return;}
   if(proposed.isEmpty()){println("DSP_MODEL_APPLY_PASS changed=0");return;}
-  if(counts.getOrDefault(State.WRONG_DIRECT,0)>0||counts.getOrDefault(State.INVALID,0)>0)
+  if(!partial&&(counts.getOrDefault(State.WRONG_DIRECT,0)>0||counts.getOrDefault(State.INVALID,0)>0))
     throw new IllegalStateException("Invalid/wrong native DO endpoints: mutation prohibited");
+  if(partial){
+    // A malformed, cross-owned or contradictory native DO interval is NOT proof
+    // against all independent loops in the same program. Exclude any owner
+    // with a disputed interval and any verified candidate that overlaps one.
+    List<Loop> incompatible=new ArrayList<>();
+    for(Loop loop:loops)if(loop.state()==State.WRONG_DIRECT||loop.state()==State.INVALID)
+      incompatible.add(loop);
+    int excluded=0;int excludedOwners=0;
+    Iterator<Map.Entry<Function,List<Loop>>> it=proposed.entrySet().iterator();
+    while(it.hasNext()){
+      var entry=it.next();List<Loop> accepted=new ArrayList<>();
+      for(Loop candidate:entry.getValue()){
+        boolean unsafe=false;
+        for(Loop bad:incompatible){
+          if(bad.owner()!=null&&bad.owner()==candidate.owner()){unsafe=true;break;}
+          if(overlapping(candidate.start(),candidate.end(),bad.start(),bad.end())){unsafe=true;break;}
+        }
+        if(unsafe){excluded++;println("DSP_MODEL_PARTIAL_EXCLUDED owner="+
+          candidate.owner().getEntryPoint()+" DO="+pm(candidate.start())+" end="+candidate.finish()+
+          " reason=conflicting_native_interval");}
+        else accepted.add(candidate);
+      }
+      if(accepted.isEmpty()){it.remove();excludedOwners++;}
+      else entry.setValue(accepted);
+    }
+    if(!manuallyExcluded.isEmpty()){
+      Set<String> matched=new LinkedHashSet<>();
+      Iterator<Map.Entry<Function,List<Loop>>> explicit=proposed.entrySet().iterator();
+      while(explicit.hasNext()){
+        var item=explicit.next();String address=item.getKey().getEntryPoint().toString().toUpperCase(Locale.ROOT);
+        if(!manuallyExcluded.contains(address))continue;
+        matched.add(address);
+        excluded+=item.getValue().size();excludedOwners++;
+        println("DSP_MODEL_EXCLUDED owner="+address+" loops="+item.getValue().size()+
+           " reason=previous_native_C_postcondition_failure; remains_OPEN");
+        explicit.remove();
+      }
+      if(!matched.equals(manuallyExcluded))throw new IllegalStateException(
+        "Supplied exclusions have no eligible owner: "+manuallyExcluded+" matched="+matched);
+    }
+    println("DSP_MODEL_PARTIAL_SCOPE eligible="+proposed.values().stream().mapToInt(List::size).sum()+
+       " owners="+proposed.size()+" excluded_loops="+excluded+
+       " excluded_owners="+excludedOwners+" unresolved_intervals="+incompatible.size());
+  }
+  if(proposed.isEmpty()){println("DSP_MODEL_APPLY_PASS changed=0; scoped safe candidates exhausted");return;}
   Register ce=reg("codec_ce_loop_end"),direct=reg("codec_ce_direct_backedge"),dest=reg("codec_ce_direct_start");
   String beforeFuncs=functions();byte[] beforeBytes=initializedSHA();
   DecompInterface d=new DecompInterface();
   if(!d.openProgram(currentProgram))throw new IllegalStateException("Decompiler init failed");
   Map<Function,String> beforeC=new LinkedHashMap<>();
-  try{for(Function f:proposed.keySet())beforeC.put(f,c(d,f));}finally{d.dispose();}
+  try{
+    for(Function f:currentProgram.getFunctionManager().getFunctions(true))
+      if(!f.isExternal())beforeC.put(f,c(d,f));
+  }finally{d.dispose();}
+  int beforeInstructions=0;
+  for(Instruction ins:currentProgram.getListing().getInstructions(true))
+    if("PM".equals(ins.getAddress().getAddressSpace().getName()))beforeInstructions++;
   int tx=currentProgram.startTransaction("Architecture-derived safe codec DO CE recovery");
   boolean commit=false;int changed=0;
   try{
@@ -207,6 +272,11 @@ public class SunplusDSPStructuralRecovery extends GhidraScript {
    }
    if(!Arrays.equals(initializedSHA(),beforeBytes)||!functions().equals(beforeFuncs))
     throw new IllegalStateException("Native PM/DM source bytes or function boundaries changed");
+   int afterInstructions=0;
+   for(Instruction ins:currentProgram.getListing().getInstructions(true))
+     if("PM".equals(ins.getAddress().getAddressSpace().getName()))afterInstructions++;
+   if(afterInstructions!=beforeInstructions)
+     throw new IllegalStateException("Original 24-bit instruction inventory changed");
    DecompInterface verify=new DecompInterface();
    if(!verify.openProgram(currentProgram))throw new IllegalStateException("Decompiler reread failed");
    try{
@@ -214,11 +284,11 @@ public class SunplusDSPStructuralRecovery extends GhidraScript {
      String prior=item.getValue(),after=c(verify,item.getKey());
      int oldDO=cLoops(prior),newDO=cLoops(after),n=itemCount(proposed.get(item.getKey()));
      int oldWarn=cWarnings(prior),newWarn=cWarnings(after);
-     println("DSP_MODEL_OWNER_DIFF owner="+item.getKey().getEntryPoint()+
+     if(n>0)println("DSP_MODEL_OWNER_DIFF owner="+item.getKey().getEntryPoint()+
        " applied="+n+" C_do="+oldDO+"->"+newDO+
        " warnings="+oldWarn+"->"+newWarn);
      if(newDO<oldDO+n||newWarn>oldWarn||after.contains("halt_baddata()"))
-       throw new IllegalStateException("Per-owner C/CFG gate failed for "+item.getKey().getEntryPoint());
+       throw new IllegalStateException("Full-corpus native C/CFG gate failed for "+item.getKey().getEntryPoint());
     }
    }finally{verify.dispose();}
    commit=true;

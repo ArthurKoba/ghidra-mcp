@@ -109,6 +109,12 @@ def test_poll_word_addresses_and_async_contract_gate() -> None:
     source = read("SunplusDSPHandshakePollRecovery.java")
     assert "Math.multiplyExact(wordAddress,(long)space.getAddressableUnitSize())" in source
     assert "address.getAddressableWordOffset()!=wordAddress" in source
-    assert "inferred polling alone cannot authorize volatile memory" in source
-    assert source.index('if(mode.equals("apply-safe"))') < source.index('List<Candidate> proposals=')
+    # Evidence must include an earlier native status publication and one
+    # unambiguous backward edge; polling alone cannot prove MMIO ownership.
+    assert "if(previousWrites==null||previousWrites.isEmpty())continue;" in source
+    assert "if(backedge==null||ambiguous)continue;" in source
+    assert "if(!precedingWrite)continue;" in source
+    # The implementation requires an exact original SHA before mutating;
+    # its guarded predicate also validates the argument count.
+    assert source.index('if(mode.equals("apply-safe")&&(a.length!=2') < source.index('List<Candidate> proposals=')
     assert 'DSP_POLL_CANDIDATE owner=' in source

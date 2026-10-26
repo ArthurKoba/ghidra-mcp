@@ -58,6 +58,10 @@ define register offset=0x0fa size=2 [
 define register offset=0x104 size=2 [
     DSP_STATIC_START_OUTER DSP_STATIC_START_INNER DSP_STATIC_CNTR_OUTER
 ];
+# Generic level-three DO register state: two free addresses before 0x110.
+define register offset=0x10a size=2 [
+    DSP_STATIC_START_THIRD DSP_STATIC_CNTR_MIDDLE
+];
 
 # RTI restores architectural status-stack state in addition to the saved PC.
 # The detailed status-stack storage is not yet modeled; keep that side effect
@@ -101,6 +105,8 @@ define context DSPCTX
     codec_le_proven_taken=(26,26) noflow
     codec_branch_proven_not_taken=(27,27) noflow
     codec_arch_stack_mode=(28,28) noflow
+    # QA-only hardware CNTR 14-bit decrement; legacy C stays unchanged.
+    codec_ce_counter14=(29,29) noflow
 ;
 
 define token inst24(24) endian = big
@@ -710,6 +716,8 @@ define pcodeop dsp_resident_tailcall;
 #   - a DO saves its return loop start, not the counter itself.
 # The four-count/frame model is scoped to the observed codec instructions.
 macro codec_cntr_load(newvalue) {
+    # The lightweight C view retains the documented width approximation.
+    # Full hardware execution (codec_arch_stack_mode=1) uses 14-bit CNTR.
     local incoming:2 = newvalue;
     if (DSP_LOOP_DEPTH == 0) goto <cntr_done>;
     if (DSP_COUNT_DEPTH == 0) goto <cntr_save0>;
@@ -724,36 +732,33 @@ macro codec_cntr_load(newvalue) {
 <cntr_done> CNTR = incoming;
 }
 
-# Native CALL/RTS uses the ADSP PC stack. Ghidra's CALL P-code branches to the
-# target, but does not populate synthetic PCSTACKTOP on its own. Keep a
-# deliberately bounded return stack for the explicitly opted-in nested mode.
-# This is not a full model of the 16-deep hardware PC stack shared with DO.
+# The hardware execution view (codec_arch_stack_mode=1) owns the full shared
+# PC16 stack and handles CALL/RTS/DO/CE exactly within its software contract.
+# The static C view remains a four-slot CALL approximation: it is used to
+# describe C control flow only, not to assert silicon stack equivalence.
 macro codec_call_push(nextword) {
-    local ret:2 = nextword;
-    if (DSP_CALL_DEPTH == 0) goto <call_push0>;
-    if (DSP_CALL_DEPTH == 1) goto <call_push1>;
-    if (DSP_CALL_DEPTH == 2) goto <call_push2>;
-    if (DSP_CALL_DEPTH == 3) goto <call_push3>;
+    local ret:2=nextword;
+    if (DSP_CALL_DEPTH==0) goto <call_push0>;
+    if (DSP_CALL_DEPTH==1) goto <call_push1>;
+    if (DSP_CALL_DEPTH==2) goto <call_push2>;
+    if (DSP_CALL_DEPTH==3) goto <call_push3>;
     goto <call_done>;
-<call_push0> DSP_CALL_RET0 = ret; DSP_CALL_DEPTH = 1; goto <call_done>;
-<call_push1> DSP_CALL_RET1 = ret; DSP_CALL_DEPTH = 2; goto <call_done>;
-<call_push2> DSP_CALL_RET2 = ret; DSP_CALL_DEPTH = 3; goto <call_done>;
-<call_push3> DSP_CALL_RET3 = ret; DSP_CALL_DEPTH = 4;
+<call_push0> DSP_CALL_RET0=ret; DSP_CALL_DEPTH=1; goto <call_done>;
+<call_push1> DSP_CALL_RET1=ret; DSP_CALL_DEPTH=2; goto <call_done>;
+<call_push2> DSP_CALL_RET2=ret; DSP_CALL_DEPTH=3; goto <call_done>;
+<call_push3> DSP_CALL_RET3=ret; DSP_CALL_DEPTH=4;
 <call_done>
 }
-
-# In opted-in nested mode, RTS (including conditional variants) consumes
-# the synthetic call stack. Hardware PC-stack sharing with DO is not modeled.
 macro codec_call_return() {
-    if (DSP_CALL_DEPTH == 1) goto <call_ret0>;
-    if (DSP_CALL_DEPTH == 2) goto <call_ret1>;
-    if (DSP_CALL_DEPTH == 3) goto <call_ret2>;
-    if (DSP_CALL_DEPTH == 4) goto <call_ret3>;
+    if (DSP_CALL_DEPTH==1) goto <call_ret0>;
+    if (DSP_CALL_DEPTH==2) goto <call_ret1>;
+    if (DSP_CALL_DEPTH==3) goto <call_ret2>;
+    if (DSP_CALL_DEPTH==4) goto <call_ret3>;
     return [PCSTACKTOP];
-<call_ret0> DSP_CALL_DEPTH = 0; return [DSP_CALL_RET0];
-<call_ret1> DSP_CALL_DEPTH = 1; return [DSP_CALL_RET1];
-<call_ret2> DSP_CALL_DEPTH = 2; return [DSP_CALL_RET2];
-<call_ret3> DSP_CALL_DEPTH = 3; return [DSP_CALL_RET3];
+<call_ret0> DSP_CALL_DEPTH=0; return [DSP_CALL_RET0];
+<call_ret1> DSP_CALL_DEPTH=1; return [DSP_CALL_RET1];
+<call_ret2> DSP_CALL_DEPTH=2; return [DSP_CALL_RET2];
+<call_ret3> DSP_CALL_DEPTH=3; return [DSP_CALL_RET3];
 }
 
 # Generic end-of-loop processing must wrap all normal instruction constructors:
@@ -767,7 +772,16 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 # runtime DSP_LOOP_START is held on silicon, but the decompiler need not
 # infer its value across a callee whose ABI cannot establish preservation.
 # This path is opt-in for individually verified DO/end instruction pairs.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=0 & codec_ce_counter14=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <codec_ce_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_direct_done>
+    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
+    CNTR = DSP_LOOP_COUNT_SHADOW;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=0 & codec_ce_counter14=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_direct_done>;
@@ -782,7 +796,14 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 # counter in DSP_STATIC_CNTR_OUTER and the inner-end restores it already.
 # The outer DO constructor stores its start separately; the direct target is
 # a statically verified DO fallthrough, never a guessed dynamic address.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <codec_ce_nested_outer_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_outer_done>
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_nested_outer_done>;
@@ -792,7 +813,31 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 # EXPERIMENT: opt-in STATIC INNER (depth=2) CE direct backedge.
 # Requires the proven CNTR-save constructor at native depth-2 counter writers.
 # The inner CE must restore the saved outer count only on exit.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <codec_ce_nested_third_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_third_direct_done>
+    CNTR = DSP_STATIC_CNTR_MIDDLE;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=1 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <codec_ce_nested_inner_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_inner_direct_done>
+    CNTR = DSP_STATIC_CNTR_OUTER;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <codec_ce_nested_third_direct_done>;
+    goto codecDirectLoopStart;
+<codec_ce_nested_third_direct_done>
+    CNTR = DSP_STATIC_CNTR_MIDDLE;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=0 & instruction & codecDirectLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_nested_inner_direct_done>;
@@ -815,7 +860,16 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
 }
 
 # Keep the proven lightweight single-loop C recovery as the default.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & codec_ce_counter14=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <simple_done>;
+    goto [DSP_LOOP_START];
+<simple_done>
+    DSP_LOOP_START = DSP_LOOP_START_SHADOW;
+    CNTR = DSP_LOOP_COUNT_SHADOW;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=0 & codec_ce_counter14=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <simple_done>;
@@ -825,14 +879,45 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
     CNTR = DSP_LOOP_COUNT_SHADOW;
 }
 # EXPERIMENT: deterministic two-level CE endpoints for CFG recovery.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <static_outer_done>;
+    goto [DSP_STATIC_START_OUTER];
+<static_outer_done>
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_outer_done>;
     goto [DSP_STATIC_START_OUTER];
 <static_outer_done>
 }
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <static_third_done>;
+    goto [DSP_STATIC_START_THIRD];
+<static_third_done>
+    CNTR = DSP_STATIC_CNTR_MIDDLE;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <static_inner_done>;
+    goto [DSP_STATIC_START_INNER];
+<static_inner_done>
+    CNTR = DSP_STATIC_CNTR_OUTER;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = CNTR - 1;
+    if (CNTR == 0) goto <static_third_done>;
+    goto [DSP_STATIC_START_THIRD];
+<static_third_done>
+    CNTR = DSP_STATIC_CNTR_MIDDLE;
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <static_inner_done>;
@@ -841,7 +926,35 @@ codecDirectLoopStart: codec_ce_direct_start is codec_ce_direct_start {
     CNTR = DSP_STATIC_CNTR_OUTER;
 }
 # Expanded stack handling is selected only for proven nested DO regions.
-:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_counter14=1 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
+    build instruction;
+    CNTR = (CNTR - 1) & 0x3fff;
+    if (CNTR == 0) goto <codec_ce_done>;
+    goto [DSP_LOOP_START];
+<codec_ce_done>
+    if (DSP_LOOP_DEPTH == 1) goto <ce_pop1>;
+    if (DSP_LOOP_DEPTH == 2) goto <ce_pop2>;
+    if (DSP_LOOP_DEPTH == 3) goto <ce_pop3>;
+    if (DSP_LOOP_DEPTH == 4) goto <ce_pop4>;
+    goto <ce_count_restore>;
+<ce_pop1> DSP_LOOP_START = 0; DSP_LOOP_DEPTH = 0; goto <ce_count_restore>;
+<ce_pop2> DSP_LOOP_START = DSP_LOOP_START_SHADOW; DSP_LOOP_DEPTH = 1; goto <ce_count_restore>;
+<ce_pop3> DSP_LOOP_START = DSP_LOOP_START_SHADOW2; DSP_LOOP_DEPTH = 2; goto <ce_count_restore>;
+<ce_pop4> DSP_LOOP_START = DSP_LOOP_START_SHADOW3; DSP_LOOP_DEPTH = 3;
+<ce_count_restore>
+    if (DSP_COUNT_DEPTH == 0) goto <ce_finish>;
+    if (DSP_COUNT_DEPTH == 1) goto <ce_count0>;
+    if (DSP_COUNT_DEPTH == 2) goto <ce_count1>;
+    if (DSP_COUNT_DEPTH == 3) goto <ce_count2>;
+    if (DSP_COUNT_DEPTH == 4) goto <ce_count3>;
+    goto <ce_finish>;
+<ce_count0> CNTR = DSP_COUNT0; DSP_COUNT_DEPTH = 0; goto <ce_finish>;
+<ce_count1> CNTR = DSP_COUNT1; DSP_COUNT_DEPTH = 1; goto <ce_finish>;
+<ce_count2> CNTR = DSP_COUNT2; DSP_COUNT_DEPTH = 2; goto <ce_finish>;
+<ce_count3> CNTR = DSP_COUNT3; DSP_COUNT_DEPTH = 3;
+<ce_finish>
+}
+:^instruction is codec_arch_stack_mode=0 & codec_ce_phase=0 & codec_ce_loop_end=1 & codec_ce_direct_backedge=0 & codec_ce_nested_mode=1 & codec_ce_counter14=0 & instruction & codecLoopStart [ codec_ce_phase=1; ] {
     build instruction;
     CNTR = CNTR - 1;
     if (CNTR == 0) goto <codec_ce_done>;
@@ -933,8 +1046,42 @@ with : codec_ce_phase=1 {
 
 # Explicit codec counter loads also model the counter-stack push on write.
 # The srvdsp wrapper retains its existing isolated language semantics.
+# Source-proven 14-bit outer CNTR writes in QA-only two-level DO/CE.
+# Masking the inner load without the outer load incorrectly preserves high
+# bits before the first hardware CE. The legacy constructors remain intact.
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local addr:2=addr14;
+    local incoming:2=*[DM]:2 addr;
+    codec_cntr_load(incoming & 0x3fff);
+}
+
+# Experimental 14-bit CNTR load in a source-proven inner loop. The
+# default C-view constructor below is preserved bit-for-bit.
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local addr:2=addr14;
+    local newval:2=*[DM]:2 addr;
+    DSP_STATIC_CNTR_MIDDLE = CNTR;
+    CNTR = newval & 0x3fff;
+}
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=1 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local addr:2=addr14;
+    local newval:2=*[DM]:2 addr;
+    DSP_STATIC_CNTR_OUTER = CNTR;
+    CNTR = newval & 0x3fff;
+}
+
 # EXPERIMENT: inner-loop counter saves the statically known outer counter.
-:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=0 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
+{
+    local addr:2=addr14;
+    local newval:2=*[DM]:2 addr;
+    DSP_STATIC_CNTR_MIDDLE = CNTR;
+    CNTR = newval;
+}
+:DMREAD CNTR, addr14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=0 & type3=4 & dir20=0 & rgp=3 & reg4=0x5 & CNTR & addr14
 {
     local addr:2=addr14;
     local newval:2=*[DM]:2 addr;
@@ -968,6 +1115,11 @@ with : codec_ce_phase=1 {
 
 # LDI CNTR is the other corpus-proven counter-stack push instruction.
 # EXPERIMENT: inner-loop immediate counter with one static saved frame.
+:LDI CNTR, data14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
+{
+    DSP_STATIC_CNTR_MIDDLE = CNTR;
+    CNTR = data14;
+}
 :LDI CNTR, data14 is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & op4=3 & rgp=3 & reg4=0x5 & CNTR & data14
 {
     DSP_STATIC_CNTR_OUTER = CNTR;
@@ -1118,30 +1270,30 @@ with : codec_ce_phase=1 {
 # Type-9 constant operand subset observed in codec profiles.  Values follow
 # ADSP-218x Table A-60 (YY/CC/BO).  Additional codes remain unsupported until
 # exercised or needed.
-AluConst: 0x0001 is yy2=0 & cc2=0 & bo2=1 { export 0x0001:2; }
-AluConst: 0x0002 is yy2=0 & cc2=1 & bo2=1 { export 0x0002:2; }
-AluConst: 0x0008 is yy2=0 & cc2=3 & bo2=1 { export 0x0008:2; }
-AluConst: 0x0010 is yy2=1 & cc2=0 & bo2=1 { export 0x0010:2; }
-AluConst: 0x0020 is yy2=1 & cc2=1 & bo2=1 { export 0x0020:2; }
-AluConst: 0x0040 is yy2=1 & cc2=2 & bo2=1 { export 0x0040:2; }
-AluConst: 0x0080 is yy2=1 & cc2=3 & bo2=1 { export 0x0080:2; }
-AluConst: 0x4000 is yy2=3 & cc2=2 & bo2=1 { export 0x4000:2; }
-AluConst: 0x0004 is yy2=0 & cc2=2 & bo2=1 { export 0x0004:2; }
-AluConst: 0x0100 is yy2=2 & cc2=0 & bo2=1 { export 0x0100:2; }
-AluConst: 0x0200 is yy2=2 & cc2=1 & bo2=1 { export 0x0200:2; }
-AluConst: 0x0400 is yy2=2 & cc2=2 & bo2=1 { export 0x0400:2; }
-AluConst: 0x0800 is yy2=2 & cc2=3 & bo2=1 { export 0x0800:2; }
-AluConst: 0x1000 is yy2=3 & cc2=0 & bo2=1 { export 0x1000:2; }
-AluConst: 0x2000 is yy2=3 & cc2=1 & bo2=1 { export 0x2000:2; }
-AluConst: 0x8000 is yy2=3 & cc2=3 & bo2=1 { export 0x8000:2; }
-AluConst: 0xfffe is yy2=0 & cc2=0 & bo2=3 { export 0xfffe:2; }
-AluConst: 0xfffd is yy2=0 & cc2=1 & bo2=3 { export 0xfffd:2; }
-AluConst: 0xfffb is yy2=0 & cc2=2 & bo2=3 { export 0xfffb:2; }
-AluConst: 0xfff7 is yy2=0 & cc2=3 & bo2=3 { export 0xfff7:2; }
-AluConst: 0xffef is yy2=1 & cc2=0 & bo2=3 { export 0xffef:2; }
-AluConst: 0xffdf is yy2=1 & cc2=1 & bo2=3 { export 0xffdf:2; }
-AluConst: 0xffbf is yy2=1 & cc2=2 & bo2=3 { export 0xffbf:2; }
-AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
+AluConst: "0x0001" is yy2=0 & cc2=0 & bo2=1 { export 0x0001:2; }
+AluConst: "0x0002" is yy2=0 & cc2=1 & bo2=1 { export 0x0002:2; }
+AluConst: "0x0008" is yy2=0 & cc2=3 & bo2=1 { export 0x0008:2; }
+AluConst: "0x0010" is yy2=1 & cc2=0 & bo2=1 { export 0x0010:2; }
+AluConst: "0x0020" is yy2=1 & cc2=1 & bo2=1 { export 0x0020:2; }
+AluConst: "0x0040" is yy2=1 & cc2=2 & bo2=1 { export 0x0040:2; }
+AluConst: "0x0080" is yy2=1 & cc2=3 & bo2=1 { export 0x0080:2; }
+AluConst: "0x4000" is yy2=3 & cc2=2 & bo2=1 { export 0x4000:2; }
+AluConst: "0x0004" is yy2=0 & cc2=2 & bo2=1 { export 0x0004:2; }
+AluConst: "0x0100" is yy2=2 & cc2=0 & bo2=1 { export 0x0100:2; }
+AluConst: "0x0200" is yy2=2 & cc2=1 & bo2=1 { export 0x0200:2; }
+AluConst: "0x0400" is yy2=2 & cc2=2 & bo2=1 { export 0x0400:2; }
+AluConst: "0x0800" is yy2=2 & cc2=3 & bo2=1 { export 0x0800:2; }
+AluConst: "0x1000" is yy2=3 & cc2=0 & bo2=1 { export 0x1000:2; }
+AluConst: "0x2000" is yy2=3 & cc2=1 & bo2=1 { export 0x2000:2; }
+AluConst: "0x8000" is yy2=3 & cc2=3 & bo2=1 { export 0x8000:2; }
+AluConst: "0xfffe" is yy2=0 & cc2=0 & bo2=3 { export 0xfffe:2; }
+AluConst: "0xfffd" is yy2=0 & cc2=1 & bo2=3 { export 0xfffd:2; }
+AluConst: "0xfffb" is yy2=0 & cc2=2 & bo2=3 { export 0xfffb:2; }
+AluConst: "0xfff7" is yy2=0 & cc2=3 & bo2=3 { export 0xfff7:2; }
+AluConst: "0xffef" is yy2=1 & cc2=0 & bo2=3 { export 0xffef:2; }
+AluConst: "0xffdf" is yy2=1 & cc2=1 & bo2=3 { export 0xffdf:2; }
+AluConst: "0xffbf" is yy2=1 & cc2=2 & bo2=3 { export 0xffbf:2; }
+AluConst: "0xff7f" is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 
 # -----------------------------------------------------------------------------
 
@@ -1885,7 +2037,7 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 }
 
 # Type 12: shift plus DM read/write.
-:SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+:SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=0 & type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 { local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12lhi_r>; res=src<<count; goto <t12lhi_d>; <t12lhi_r> count=-count; res=src>>count; <t12lhi_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
 :SR "=" "ASHIFT" ShiftX "(HI)," "DM(" ShiftDagI "," ShiftDagM ")" "=" DReg4 is type12=9 & shift_d=1 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 { local a:2=ShiftDagI; local m:2=ShiftDagM; local stored:2=DReg4; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t12awh_r>; res=src<<count; goto <t12awh_d>; <t12awh_r> count=-count; res=src s>>count; <t12awh_d> SR0=res:2; SR1=res[16,16]; *[DM]:2 ShiftDmAddress=stored; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
@@ -1895,7 +2047,7 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 # Type 14/16 additional shifter forms.
 :SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" DReg is op8=0x10 & sf4=0 & ShiftX & DReg4 & DReg
 { local moved:2=DReg; local src:4=zext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t14hi_r>; res=src<<count; goto <t14hi_d>; <t14hi_r> count=-count; res=src>>count; <t14hi_d> SR0=res:2; SR1=res[16,16]; DReg4=moved; }
-:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" DReg is op8=0x10 & sf4=3 & ShiftX & DReg4 & DReg
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" DReg is codec_se_proven_nonnegative=0 & op8=0x10 & sf4=3 & ShiftX & DReg4 & DReg
 { local moved:2=DReg; local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src; if(count s<0) goto <t14or_r>; shifted=src<<count; goto <t14or_d>; <t14or_r> count=-count; shifted=src>>count; <t14or_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=moved; }
 :SR "=" "LSHIFT" ShiftX "(HI)" is op8=0x0e & sf4=0 & ShiftX & mid4=0 & cond4=15
 { local src:4=zext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <t16hi_r>; res=src<<count; goto <t16hi_d>; <t16hi_r> count=-count; res=src>>count; <t16hi_d> SR0=res:2; SR1=res[16,16]; }
@@ -1903,9 +2055,9 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { local src:4=sext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <t16alo_r>; res=src<<count; goto <t16alo_d>; <t16alo_r> count=-count; res=src s>>count; <t16alo_d> SR0=res:2; SR1=res[16,16]; }
 
 # Deep shift reachable forms.
-:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=2 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=0 & type12=9 & shift_d=0 & sf4=2 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 { local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX); local count:2=SE; local res:4=src; if(count s<0) goto <deep_t12llo_r>; res=src<<count; goto <deep_t12llo_d>; <deep_t12llo_r> count=-count; res=src>>count; <deep_t12llo_d> SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL); }
-:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" DReg is op8=0x10 & sf4=4 & ShiftX & DReg4 & DReg
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" DReg is codec_se_proven_nonnegative=0 & op8=0x10 & sf4=4 & ShiftX & DReg4 & DReg
 { local moved:2=DReg; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <deep_t14ahi_r>; res=src<<count; goto <deep_t14ahi_d>; <deep_t14ahi_r> count=-count; res=src s>>count; <deep_t14ahi_d> SR0=res:2; SR1=res[16,16]; DReg4=moved; }
 :SR "=" "ASHIFT" ShiftX "(LO)," DReg4 "=" DReg is op8=0x10 & sf4=6 & ShiftX & DReg4 & DReg
 { local moved:2=DReg; local src:4=sext(ShiftX); local count:2=SE; local negative:1=count s<0; local mask:4=-zext(negative); local countmask:2=mask:2; local magnitude:2=-count; local leftcount:2=count & ~countmask; local rightcount:2=magnitude & countmask; local leftval:4=src<<leftcount; local rightval:4=src s>>rightcount; local res:4=(leftval & ~mask) | (rightval & mask); SR0=res:2; SR1=res[16,16]; DReg4=moved; }
@@ -1913,14 +2065,14 @@ AluConst: 0xff7f is yy2=1 & cc2=3 & bo2=3 { export 0xff7f:2; }
 { local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src; if(count s<0) goto <deep_t16ahi_r>; res=src<<count; goto <deep_t16ahi_d>; <deep_t16ahi_r> count=-count; res=src s>>count; <deep_t16ahi_d> SR0=res:2; SR1=res[16,16]; }
 
 
-:SR "=" "SR OR LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=1 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+:SR "=" "SR OR LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=0 & type12=9 & shift_d=0 & sf4=1 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX)<<16; local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t12orhi_r>; shifted=src<<count; goto <final_t12orhi_d>;
 <final_t12orhi_r> count=-count; shifted=src>>count;
 <final_t12orhi_d> local old:4=(zext(SR1)<<16)|zext(SR0); local res:4=old|shifted; SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
-:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=3 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=0 & type12=9 & shift_d=0 & sf4=3 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t12orlo_r>; shifted=src<<count; goto <final_t12orlo_d>;
@@ -2268,6 +2420,11 @@ macro resident_tail(target) {
 {
     DSP_STATIC_START_OUTER = inst_next / 3;
 }
+:"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & type11=5 & term4=14 & LoopAddr
+    [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
+{
+    DSP_STATIC_START_THIRD = inst_next / 3;
+}
 :"DO" LoopAddr "UNTIL CE" is codec_arch_stack_mode=0 & srvdsp_wrapper_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type11=5 & term4=14 & LoopAddr
     [ codec_ce_loop_end=1; globalset(LoopAddr, codec_ce_loop_end); ]
 {
@@ -2300,7 +2457,7 @@ macro resident_tail(target) {
 # Type 12/13 shift+memory forms reached by codec profiles.
 # -----------------------------------------------------------------------------
 
-:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=0 & type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
 {
     local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=sext(ShiftX)<<16; local count:2=SE; local res:4=src;
     if (count s<0) goto <t12ahi_r>; res=src<<count; goto <t12ahi_d>;
@@ -2311,7 +2468,7 @@ macro resident_tail(target) {
 {
     local a:2=ShiftDagI; local m:2=ShiftDagM; local fetched:2=*[DM]:2 ShiftDmAddress; local src:4=sext(ShiftX); local count:2=SE; local negative:1=count s<0; local mask:4=-zext(negative); local countmask:2=mask:2; local magnitude:2=-count; local leftcount:2=count & ~countmask; local rightcount:2=magnitude & countmask; local leftval:4=src<<leftcount; local rightval:4=src s>>rightcount; local res:4=(leftval & ~mask) | (rightval & mask); SR0=res:2; SR1=res[16,16]; DReg4=fetched; dsp_dag_postmodify(ShiftDagI, a, m, ShiftDagL);
 }
-:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=2 & ShiftX & DReg4 & DagI & DagM & DagL
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is codec_se_proven_nonnegative=0 & op8=0x11 & shift_d=0 & sf4=2 & ShiftX & DReg4 & DagI & DagM & DagL
 {
     local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local src:4=zext(ShiftX); local count:2=SE; local res:4=src;
     if (count s<0) goto <t13l_r>; res=src<<count; goto <t13l_d>;
@@ -2320,7 +2477,7 @@ macro resident_tail(target) {
 }
 
 
-:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is op8=0x11 & shift_d=0 & sf4=3 & ShiftX & DReg4 & DagI & DagM & DagL
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is codec_se_proven_nonnegative=0 & op8=0x11 & shift_d=0 & sf4=3 & ShiftX & DReg4 & DagI & DagM & DagL
 {
     local a:2=DagI; local m:2=DagM; local word:3=dsp_pm_load24(a); local src:4=zext(ShiftX); local count:2=SE; local shifted:4=src;
     if(count s<0) goto <final_t13or_r>; shifted=src<<count; goto <final_t13or_d>;
@@ -2592,10 +2749,31 @@ macro resident_tail(target) {
 # Type 17 internal data-register move.
 # -----------------------------------------------------------------------------
 
-# Opt-in two-level loop counter save before a native Type17 register move
-# such as CNTR = AR or CNTR = AY0. Only depth 2 uses the outer frame;
-# the generic Type17 move remains unchanged for all other instructions.
-:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+# Two-level loop counter save before a native Type17 register move.
+# An outer CNTR move needs the same proven 14-bit width as the inner
+# writer and CE. This path does not invent a nested stack frame.
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=1 & codec_ce_counter14=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+{
+    IntDst = IntSrc & 0x3fff;
+}
+
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+{
+    DSP_STATIC_CNTR_MIDDLE = CNTR;
+    IntDst = IntSrc & 0x3fff;
+}
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=1 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+{
+    DSP_STATIC_CNTR_OUTER = CNTR;
+    IntDst = IntSrc & 0x3fff;
+}
+
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=3 & codec_ce_counter14=0 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
+{
+    DSP_STATIC_CNTR_MIDDLE = CNTR;
+    IntDst = IntSrc;
+}
+:"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & codec_ce_static_depth=2 & codec_ce_counter14=0 & type17=0x0d0 & dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc
 {
     DSP_STATIC_CNTR_OUTER = CNTR;
     IntDst = IntSrc;
@@ -2757,3 +2935,77 @@ macro resident_tail(target) {
 @include "sunplus_stack_instructions.sinc"
 
 } # end generic codec loop instruction layer
+
+# Exact source-native SE >= 0 context: direct parallel shift/DM and PM accesses.
+# Dynamic SE retains the original bidirectional shift constructors. These
+# variants remove synthetic impossible branch blocks from C, not hardware
+# data-flow edges. ProgramScriptService must prove SE>=0 over a native DO CFG
+# before setting the context for a particular instruction; no PM exceptions.
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=1 & type12=9 & shift_d=0 & sf4=2 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{
+    local a:2=ShiftDagI; local m:2=ShiftDagM;
+    local fetched:2=*[DM]:2 ShiftDmAddress;
+    local src:4=zext(ShiftX);local res:4=src<<SE;
+    SR0=res:2;SR1=res[16,16];DReg4=fetched;
+    dsp_dag_postmodify(ShiftDagI,a,m,ShiftDagL);
+}
+:SR "=" "LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=1 & type12=9 & shift_d=0 & sf4=0 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{
+    local a:2=ShiftDagI;local m:2=ShiftDagM;
+    local fetched:2=*[DM]:2 ShiftDmAddress;
+    local src:4=zext(ShiftX)<<16;local res:4=src<<SE;
+    SR0=res:2;SR1=res[16,16];DReg4=fetched;
+    dsp_dag_postmodify(ShiftDagI,a,m,ShiftDagL);
+}
+:SR "=" "SR OR LSHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=1 & type12=9 & shift_d=0 & sf4=1 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{
+    local a:2=ShiftDagI;local m:2=ShiftDagM;
+    local fetched:2=*[DM]:2 ShiftDmAddress;
+    local src:4=zext(ShiftX)<<16;local shifted:4=src<<SE;
+    local old:4=(zext(SR1)<<16)|zext(SR0);local res:4=old|shifted;
+    SR0=res:2;SR1=res[16,16];DReg4=fetched;
+    dsp_dag_postmodify(ShiftDagI,a,m,ShiftDagL);
+}
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=1 & type12=9 & shift_d=0 & sf4=3 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{
+    local a:2=ShiftDagI;local m:2=ShiftDagM;
+    local fetched:2=*[DM]:2 ShiftDmAddress;
+    local src:4=zext(ShiftX);local shifted:4=src<<SE;
+    local old:4=(zext(SR1)<<16)|zext(SR0);local res:4=old|shifted;
+    SR0=res:2;SR1=res[16,16];DReg4=fetched;
+    dsp_dag_postmodify(ShiftDagI,a,m,ShiftDagL);
+}
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" "DM(" ShiftDagI "," ShiftDagM ")" is codec_se_proven_nonnegative=1 & type12=9 & shift_d=0 & sf4=4 & ShiftX & DReg4 & ShiftDagI & ShiftDagM & ShiftDmAddress & ShiftDagL
+{
+    local a:2=ShiftDagI;local m:2=ShiftDagM;
+    local fetched:2=*[DM]:2 ShiftDmAddress;
+    local src:4=sext(ShiftX)<<16;local res:4=src<<SE;
+    SR0=res:2;SR1=res[16,16];DReg4=fetched;
+    dsp_dag_postmodify(ShiftDagI,a,m,ShiftDagL);
+}
+:SR "=" "ASHIFT" ShiftX "(HI)," DReg4 "=" DReg is codec_se_proven_nonnegative=1 & op8=0x10 & sf4=4 & ShiftX & DReg4 & DReg
+{
+    local moved:2=DReg;local src:4=sext(ShiftX)<<16;
+    local res:4=src<<SE;SR0=res:2;SR1=res[16,16];DReg4=moved;
+}
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" DReg is codec_se_proven_nonnegative=1 & op8=0x10 & sf4=3 & ShiftX & DReg4 & DReg
+{
+    local moved:2=DReg;local src:4=zext(ShiftX);
+    local shifted:4=src<<SE;local old:4=(zext(SR1)<<16)|zext(SR0);
+    local res:4=old|shifted;SR0=res:2;SR1=res[16,16];DReg4=moved;
+}
+:SR "=" "LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is codec_se_proven_nonnegative=1 & op8=0x11 & shift_d=0 & sf4=2 & ShiftX & DReg4 & DagI & DagM & DagL
+{
+    local a:2=DagI;local m:2=DagM;local word:3=dsp_pm_load24(a);
+    local src:4=zext(ShiftX);local res:4=src<<SE;
+    SR0=res:2;SR1=res[16,16];DReg4=word[8,16];PX=zext(word[0,8]);
+    dsp_dag_postmodify(DagI,a,m,DagL);
+}
+:SR "=" "SR OR LSHIFT" ShiftX "(LO)," DReg4 "=" "PM(" DagI "," DagM ")" is codec_se_proven_nonnegative=1 & op8=0x11 & shift_d=0 & sf4=3 & ShiftX & DReg4 & DagI & DagM & DagL
+{
+    local a:2=DagI;local m:2=DagM;local word:3=dsp_pm_load24(a);
+    local src:4=zext(ShiftX);local shifted:4=src<<SE;
+    local old:4=(zext(SR1)<<16)|zext(SR0);local res:4=old|shifted;
+    SR0=res:2;SR1=res[16,16];DReg4=word[8,16];PX=zext(word[0,8]);
+    dsp_dag_postmodify(DagI,a,m,DagL);
+}

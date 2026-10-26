@@ -59,9 +59,15 @@ def test_release_manifest_pins_the_complete_source_bundle():
     manifest = json.loads((ROOT / "processors/SunplusSPHEAudioDSP/MODEL_RELEASE.json").read_text())
     assert manifest["status"] == "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING"
     assert manifest["Ghidra"] == "12.1.3"
-    assert manifest["compiled_sla_sha256"] == "e1fa22cf975c69212f96a2cff81f4d358ba8b0729bf83a51898c2cfb3e3f28df"
+    assert manifest["compiled_sla_sha256"] == "b8bc249a835066645ee8244c3572578009418e35ae5977e9e4b77a35f12e22a9"
     assert len(manifest["files_sha256"]) == 9
     for name, digest in manifest["files_sha256"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
     assert manifest["reproducible_local"]["native_C"] == 462
     assert manifest["reproducible_local"]["CE_indirect_proven"] == 58
+    latest = manifest["latest_local_source_native_20261026"]
+    assert latest["source_native_function_C_generated"] == 547
+    assert latest["source_native_DO_CE_count"] == 548
+    assert latest["vector_handler_paths_RTI_complete"] == 4
+    assert latest["C_warning_lines"] == 0
+    assert latest["canonical_save_readback"] == "PENDING"

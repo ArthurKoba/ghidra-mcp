@@ -106,13 +106,203 @@ public class ProgramScriptService {
         return null;
     }
     private boolean prepareAndRunAutoAnalysis(Program program, boolean force) throws Exception {
+        com.xebyte.sunplus.SunplusDspResetVectorBootstrap.Result rootBoot =
+            com.xebyte.sunplus.SunplusDspResetVectorBootstrap.prepare(program,
+                ghidra.util.task.TaskMonitor.DUMMY);
+        if (rootBoot.recognized() && rootBoot.changed()) {
+            Msg.info(this, "Sunplus DSP source reset root: " + rootBoot.entry());
+        }
         SunplusSrvdspPostProcessor.Result preparation =
             SunplusSrvdspPostProcessor.prepare(program, ghidra.util.task.TaskMonitor.DUMMY);
         if (preparation.applicable()) {
             Msg.info(this, "Prepared Sunplus srvdsp: handlers=" + preparation.handlerCount()
                 + ", functions=" + preparation.functionCount());
         }
-        return runAutoAnalysisAndPersistFlags(program, force);
+        // AutoAnalysisManager starts within a GhidraMCP transaction. Its
+        // nested analyzer transactions cannot guarantee rollback. Complete
+        // and persist ordinary analysis first; recover native DO/CE in an
+        // isolated top-level transaction afterward.
+        if (!runAutoAnalysisAndPersistFlags(program, force)) return false;
+        if (com.xebyte.sunplus.SunplusNativeCeAutoAnalyzer.LANGUAGE.equals(
+                program.getLanguageID().getIdAsString())) {
+            MessageLog dmEvidence = new MessageLog();
+            if (!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer.applyAfterSavedAnalysis(
+                    program, ghidra.util.task.TaskMonitor.DUMMY, dmEvidence)) {
+                Msg.warn(this, "Sunplus DSP source DM16 normalizer rejected: " + dmEvidence);
+                return false;
+            }
+            if (program.isChanged()) {
+                persistProgram(program, "Sunplus DSP source-native DM16 type recovery complete");
+            }
+            if (!dmEvidence.toString().isBlank()) {
+                Msg.info(this, "Sunplus DSP DM16 source evidence: " + dmEvidence);
+            }
+            // Repair source-proven, already decoded PM code islands left
+            // outside their native function after Ghidra shared-return passes.
+            // Independent saved transaction; the native C generator accepts
+            // only warning-nonregressing function extents.
+            MessageLog ownerEvidence = new MessageLog();
+            if (!com.xebyte.sunplus.SunplusNativeFlowOwnerRecovery.applyAfterSavedAnalysis(
+                    program, ghidra.util.task.TaskMonitor.DUMMY, ownerEvidence)) {
+                Msg.warn(this, "Sunplus DSP function ownership recovery refused: " + ownerEvidence);
+                return false;
+            }
+            if (program.isChanged())
+                persistProgram(program, "Sunplus DSP source-native PM function ownership recovered");
+            if (!ownerEvidence.toString().isBlank())
+                Msg.info(this, "Sunplus DSP PM owner evidence: " + ownerEvidence);
+            // A shared native handler reached from distinct source functions
+            // cannot be assigned to one owner. Preserve all proven incoming
+            // JUMP providers and the tail consumer as program-linked static
+            // behavior contracts, never fabricated CALL/XREF edges.
+            MessageLog sharedOwnerEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeSharedContinuationRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,sharedOwnerEvidence)){
+                Msg.warn(this,"Sunplus shared PM continuation rejected: "+sharedOwnerEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source-native shared continuation verified");
+            if(!sharedOwnerEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus shared native continuation evidence: "+sharedOwnerEvidence);
+            var nativeCe = new com.xebyte.sunplus.SunplusNativeCeAutoAnalyzer();
+            MessageLog evidence = new MessageLog();
+            if (!nativeCe.applyAfterSavedAnalysis(program,
+                    ghidra.util.task.TaskMonitor.DUMMY, evidence)) {
+                Msg.warn(this, "Sunplus DSP native CE post-analysis rejected: " + evidence);
+                return false;
+            }
+            if (program.isChanged()) {
+                persistProgram(program, "Sunplus DSP automatic source-native DO/CE complete");
+            }
+            if (!evidence.toString().isBlank()) {
+                Msg.info(this, "Sunplus DSP native CE post-analysis: " + evidence);
+            }
+            // Direct CE recovery can expose additional architecturally
+            // 16-bit DM references that were hidden behind computed CFG
+            // edges during the first C pass. Converge sparsely, with a
+            // strict bound and a durable save between independent passes.
+            // Never infer physical RAM or MMIO ownership from a DM address.
+            for (int dmPass = 0; dmPass < 2; dmPass++) {
+                MessageLog residual = new MessageLog();
+                if (!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer.applyAfterSavedAnalysis(
+                        program, ghidra.util.task.TaskMonitor.DUMMY, residual)) {
+                    Msg.warn(this, "Sunplus DSP residual DM16 recovery rejected: " + residual);
+                    return false;
+                }
+                if (!program.isChanged()) break;
+                persistProgram(program, "Sunplus DSP residual source-native DM16 pass " +
+                    (dmPass + 1));
+                if (!residual.toString().isBlank()) {
+                    Msg.info(this, "Sunplus DSP residual DM16 evidence: " + residual);
+                }
+            }
+            // Experimental processor behavior only in the private QA folder
+            // with an explicit worker opt-in. It never runs on a canonical
+            // program until exact machine and C readback acceptance is proven.
+            MessageLog nestedEvidence = new MessageLog();
+            if (!nativeCe.applyExperimentalNestedAfterSavedAnalysis(program,
+                    ghidra.util.task.TaskMonitor.DUMMY,nestedEvidence)) {
+                Msg.warn(this, "Sunplus DSP QA two-level native CE rejected: " + nestedEvidence);
+                return false;
+            }
+            // Recover native 16-bit DM cells exposed only AFTER the optional
+            // nested CE recode. Running the DM layout pass before this point
+            // cannot see references in branches that were still indirect.
+            // This stays inside the isolated QA program and requires an
+            // actual saved source-derived nested transformation.
+            boolean nestedChanged=program.isChanged();
+            if(nestedChanged)
+                persistProgram(program,"Sunplus DSP source-native two-level QA experiment");
+            if(!nestedEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus DSP nested QA evidence: "+nestedEvidence);
+            if(nestedChanged) {
+                for(int nestedDmPass=0;nestedDmPass<2;nestedDmPass++) {
+                    MessageLog postNestedDm=new MessageLog();
+                    if(!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer.applyAfterSavedAnalysis(
+                            program,ghidra.util.task.TaskMonitor.DUMMY,postNestedDm)) {
+                        Msg.warn(this,"Sunplus DSP post-nested source DM16 rejected: "+postNestedDm);
+                        return false;
+                    }
+                    if(!program.isChanged())break;
+                    persistProgram(program,"Sunplus DSP post-nested native DM16 pass "+
+                        (nestedDmPass+1));
+                    if(!postNestedDm.toString().isBlank())
+                        Msg.info(this,"Sunplus DSP post-nested DM16 evidence: "+postNestedDm);
+                }
+            }
+            // A native DM polling loop must preserve the observable memory
+            // access even if the source C optimizer otherwise removes its
+            // complete body. Proof is an original constant DM LOAD/STORE on
+            // a bounded native backedge; use one-word volatile blocks, never
+            // a guessed hardware/peripheral memory map.
+            MessageLog pollingEvidence = new MessageLog();
+            if (!com.xebyte.sunplus.SunplusNativePollingMemoryRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,pollingEvidence)) {
+                Msg.warn(this,"Sunplus source DM polling recovery rejected: " + pollingEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP original PM polling DM effects restored");
+            if(!pollingEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus source observable DM effects: " + pollingEvidence);
+            // Constant signed-negative SE in an unbranched native DO has one
+            // determinate arithmetic-shift direction. Recode only proven
+            // parallel ASHIFT instructions to eliminate synthetic branch
+            // blocks after source C/PC-flow recovery (never by PM address).
+            MessageLog seEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeSeSignAutoRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,seEvidence)){
+                Msg.warn(this,"Sunplus DSP native SE proof rejected: " + seEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source-proven signed-negative SE resolved");
+            if(!seEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus DSP SE sign evidence: "+seEvidence);
+            // Recover provably taken native signed branches from the source
+            // AF/AR flag data-flow contract, never from handwritten C, a PM
+            // address exception, or an invented jump edge. This also removes
+            // C optimizer warnings caused by a decoded redundant branch.
+            MessageLog signedLeEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeSignedLeFlowRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,signedLeEvidence)){
+                Msg.warn(this,"Sunplus DSP source signed LE recovery rejected: "+signedLeEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source-proven direct signed LE transfers");
+            if(!signedLeEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus signed LE flow evidence: "+signedLeEvidence);
+            // Reject impossible native branch edges only after an exact
+            // source-derived flags/data-flow proof. This is a semantic CFG
+            // correction, not hiding C optimizer warnings or removing code.
+            MessageLog falseFlowEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeFalseBranchFlowRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,falseFlowEvidence)){
+                Msg.warn(this,"Sunplus source false branch recovery rejected: "+falseFlowEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source-proven false branch flow corrected");
+            if(!falseFlowEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus DSP false-branch flow evidence: "+falseFlowEvidence);
+            // The native ISA can execute CALL and then DO/CE backedge from
+            // one machine instruction. Ghidra's FlowType cannot represent
+            // both flow kinds, so preserve the actual CALL and JUMP edges,
+            // and save a scoped composite behavior contract in the program.
+            MessageLog compositeFlowEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeCeCallCompositeRecovery.applyAfterSavedAnalysis(
+                    program,ghidra.util.task.TaskMonitor.DUMMY,compositeFlowEvidence)){
+                Msg.warn(this,"Sunplus native compound CALL/CE proof rejected: "+compositeFlowEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus DSP source-native compound CALL/CE contract");
+            if(!compositeFlowEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus DSP composite CALL/CE evidence: "+compositeFlowEvidence);
+        }
+        return true;
     }
 
     private boolean runAutoAnalysisAndPersistFlags(Program program, boolean force) {
