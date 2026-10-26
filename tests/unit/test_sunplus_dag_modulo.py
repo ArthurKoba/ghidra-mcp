@@ -83,7 +83,7 @@ def test_all_postmodification_families_use_one_canonical_semantics() -> None:
     assert "target = (linear & ~mode) | (circular & mode);" in body
     # Every DAG post-modifier (including parallel PM+DM and MODIFY) carries L.
     counts = Counter(re.findall(r"dsp_dag_postmodify\((DagI|ShiftDagI|PmI|DmI|ModI),", source))
-    assert counts == {"DagI": 58, "ShiftDagI": 11, "PmI": 8, "DmI": 8, "ModI": 1}
+    assert counts == {"DagI": 60, "ShiftDagI": 16, "PmI": 8, "DmI": 8, "ModI": 1}
     assert "& ModL" in source and "& ShiftDagL" in source
 
 

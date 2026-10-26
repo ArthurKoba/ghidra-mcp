@@ -130,6 +130,26 @@ public final class SunplusSrvdspPostProcessor {
                     }
                     changed = true;
                 }
+                // A freshly imported raw DSP handler defaults to the Ghidra
+                // "unknown" calling convention even though this processor
+                // compiler spec supplies a concrete native "default" ABI.
+                // Locking a void signature while CC stays "unknown" produces
+                // WARNING: Unknown calling convention -- yet parameter storage
+                // is locked in *every* generated C function. Recover the ABI
+                // from this installed compiler specification, never from a
+                // firmware-specific function name or synthetic signature.
+                if (function.getSignatureSource() != SourceType.USER_DEFINED &&
+                        "unknown".equals(function.getCallingConventionName())) {
+                    String defaultConvention =
+                        program.getCompilerSpec().getDefaultCallingConvention().getName();
+                    if (defaultConvention == null || defaultConvention.isBlank() ||
+                            "unknown".equals(defaultConvention)) {
+                        throw new IllegalStateException(
+                            "No valid native Sunplus DSP default calling convention");
+                    }
+                    function.setCallingConvention(defaultConvention);
+                    changed = true;
+                }
                 if (function.getSignatureSource() != SourceType.USER_DEFINED &&
                         function.getReturnType().getName().startsWith("undefined")) {
                     function.setReturnType(VoidDataType.dataType, SourceType.ANALYSIS);
@@ -194,6 +214,15 @@ public final class SunplusSrvdspPostProcessor {
         if (context.hasValueOverRange(wrapperMode, BigInteger.ONE, range)) {
             return false;
         }
+        // Ghidra forbids changing decode context under existing instructions.
+        // An imported, not-yet-decoded image can use the entire PM window.
+        // For a SAVED and already decoded program, keep the other instructions
+        // and their user annotations intact: ensureInstructionModelRevision()
+        // applies wrapper context only to the proven 18 native sites after
+        // temporarily clearing those instruction units, then decodes them.
+        if (program.getListing().getInstructions(range, true).hasNext()) {
+            return false;
+        }
         context.setValue(wrapperMode, start, end, BigInteger.ONE);
         return true;
     }
@@ -207,10 +236,18 @@ public final class SunplusSrvdspPostProcessor {
         }
 
         Listing listing = program.getListing();
+        Register wrapperMode = program.getProgramContext().getRegister(WRAPPER_CONTEXT_REGISTER);
+        if (wrapperMode == null) {
+            throw new IllegalStateException("Sunplus srvdsp wrapper context register unavailable");
+        }
         for (long word : MODEL_REFRESH_WORDS) {
             Address start = pmWord(pm, word);
             Address end = start.add(pm.getAddressableUnitSize() - 1L);
+            // Preserve unrelated per-instruction decode flags and all existing
+            // function bodies/names. Context is changed only while this exact
+            // native instruction has no CodeUnit, avoiding ContextChangeException.
             listing.clearCodeUnits(start, end, false);
+            program.getProgramContext().setValue(wrapperMode, start, end, BigInteger.ONE);
             DisassembleCommand refresh =
                 new DisassembleCommand(new AddressSet(start, end), null, true);
             if (!refresh.applyTo(program, monitor) || listing.getInstructionAt(start) == null) {

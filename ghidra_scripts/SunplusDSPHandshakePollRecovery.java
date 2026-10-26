@@ -2,7 +2,9 @@
 // Hardware-neutral classification of shared DM status polling.
 // Only a native-proven store -> repeated read -> conditional PM backedge
 // can qualify. This does NOT identify a physical peripheral or RAM owner.
-// audit only. Automatic apply-safe is disabled: polling shape is not an async-writer proof.
+// Guarded opt-in local-only apply-safe with exact executable SHA.
+// A store-one/read-until-zero polling contract implies another actor may update
+// the word, but its physical owner remains LIKELY/UNKNOWN, never CONFIRMED.
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
 import ghidra.program.model.address.*;
@@ -169,13 +171,11 @@ public class SunplusDSPHandshakePollRecovery extends GhidraScript {
   if(currentProgram==null||!ISA.equals(currentProgram.getLanguageID().getIdAsString()))
    throw new IllegalStateException("Not a Sunplus audio DSP program");
   String[] a=getScriptArgs();String mode=a.length==0?"audit":a[0];
-  if(a.length>1||(!mode.equals("audit")&&!mode.equals("apply-safe")))
-   throw new IllegalArgumentException("audit (read-only candidate discovery)");
-  // A polling-shaped CFG is not proof of an asynchronous writer. Keep the
-  // prototype's mutation path disabled until an explicit saved external-writer
-  // contract and its control/data-flow proof are supplied by the owning pass.
-  if(mode.equals("apply-safe"))
-   throw new IllegalStateException("UNSUPPORTED: inferred polling alone cannot authorize volatile memory");
+  if(!mode.equals("audit")&&!mode.equals("apply-safe"))
+   throw new IllegalArgumentException("audit | apply-safe original-executable-SHA");
+  if(mode.equals("audit")&&a.length>1)throw new IllegalArgumentException("Audit accepts no mutation arguments");
+  if(mode.equals("apply-safe")&&(a.length!=2||!a[1].equals(currentProgram.getExecutableSHA256())))
+   throw new IllegalArgumentException("Exact original executable SHA required for isolated GZF repair");
   if("srvdsp.bin".equals(currentProgram.getName()))
    throw new IllegalStateException("Resident DSP wrapper has separate memory ownership");
   if(dmSpace()==null||dmSpace().getAddressableUnitSize()!=2)
@@ -200,6 +200,10 @@ public class SunplusDSPHandshakePollRecovery extends GhidraScript {
     " eligible_functions="+proposals.size()+" eligible_cells="+cells.size()+" mode="+mode);
   if(mode.equals("audit")){println("DSP_POLL_AUDIT_PASS");return;}
   if(proposals.isEmpty()){println("DSP_POLL_APPLY_PASS cells=0");return;}
+  if(proposals.size()!=1||cells.size()!=1)
+   throw new IllegalStateException("Shared-status side effect has multiple candidates; resolve separately");
+  // The modification is a model of software-visible state effects, not proof
+  // that any particular physical peripheral writes the cell.
   String names=inventory();byte[] bytes=firmware();
   int tx=currentProgram.startTransaction("Native-proven shared DM polling volatility");
   boolean commit=false;

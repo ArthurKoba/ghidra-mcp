@@ -285,6 +285,17 @@ def test_srvdsp_processor_model_revision_refresh_is_bounded() -> None:
     assert 'startsWith("JUMP_RESIDENT")' in accept
 
 
+def test_saved_srvdsp_context_migration_respects_existing_instructions() -> None:
+    """Never change a context register underneath decoded saved CodeUnits."""
+    post = POST.read_text()
+    assert "getInstructions(range, true).hasNext()" in post
+    assert "listing.clearCodeUnits(start, end, false);" in post
+    assert "program.getProgramContext().setValue(wrapperMode, start, end, BigInteger.ONE)" in post
+    assert post.index("listing.clearCodeUnits(start, end, false);") < post.index(
+        "program.getProgramContext().setValue(wrapperMode, start, end, BigInteger.ONE)"
+    )
+
+
 def test_decode_smoke_covers_codec_profile_extension_words() -> None:
     smoke = SMOKE.read_text()
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
@@ -425,7 +436,14 @@ def test_nested_codec_ce_outer_direct_backedge_keeps_counter_stack_ownership() -
     )
     assert normal in text
     assert outer in text
-    body = text.split(outer, 1)[1].split('}', 1)[0]
+    # Two mutually exclusive C-view variants: default 16-bit and opted-in
+    # 14-bit native CE counter; both must keep the same proven direct edge.
+    outer_legacy = outer + ' & codec_ce_counter14=0'
+    outer_native = outer + ' & codec_ce_counter14=1'
+    assert text.count(outer_legacy) == text.count(outer_native) == 1
+    native_body = text.split(outer_native, 1)[1].split('}', 1)[0]
+    assert 'CNTR = (CNTR - 1) & 0x3fff;' in native_body
+    body = text.split(outer_legacy, 1)[1].split('}', 1)[0]
     assert 'goto codecDirectLoopStart;' in body
     assert 'CNTR = CNTR - 1;' in body
     assert 'CNTR = DSP_LOOP_COUNT_SHADOW;' not in body
@@ -443,8 +461,14 @@ def test_nested_codec_ce_inner_direct_backedge_restores_counter() -> None:
         'codec_ce_direct_backedge=1 & codec_ce_nested_mode=1 & '
         'codec_ce_static_depth=2'
     )
-    assert text.count(signature) == 1
-    body = text.split(signature, 1)[1].split('}', 1)[0]
+    assert text.count(signature) == 2  # opted-in 14-bit and default C view
+    native = signature + ' & codec_ce_counter14=1'
+    legacy = signature + ' & codec_ce_counter14=0'
+    assert text.count(native) == text.count(legacy) == 1
+    native_body = text.split(native, 1)[1].split('}', 1)[0]
+    assert 'CNTR = (CNTR - 1) & 0x3fff;' in native_body
+    assert 'CNTR = DSP_STATIC_CNTR_OUTER;' in native_body
+    body = text.split(legacy, 1)[1].split('}', 1)[0]
     assert 'build instruction;' in body
     assert 'CNTR = CNTR - 1;' in body
     assert 'goto codecDirectLoopStart;' in body
@@ -509,7 +533,7 @@ def test_all_observed_combined_pm24_forms_preserve_full_width_userop_contract() 
     text = SLASPEC.read_text()
     # Constructor exports of code addresses (PM:2) are not dynamic PM data.
     assert text.count("local pw:3=dsp_pm_load24(pa);") == 8
-    assert text.count("local word:3=dsp_pm_load24(a);") == 14
+    assert text.count("local word:3=dsp_pm_load24(a);") == 16
     assert text.count("dsp_pm_store24(a,word);") == 5  # pure Type-5 + 4 MAC/ALU variants
     assert "*[PM]:3" not in "\n".join(
         line for line in text.splitlines() if not line.lstrip().startswith("#")
@@ -548,10 +572,12 @@ def test_nested_type17_cntr_register_move_saves_outer_counter_frame() -> None:
     text = SLASPEC.read_text()
     special = (
         ':"" IntDst "=" IntSrc is codec_arch_stack_mode=0 & codec_ce_nested_mode=1 & '
-        'codec_ce_static_depth=2 & type17=0x0d0 & '
+        'codec_ce_static_depth=2 & codec_ce_counter14=0 & type17=0x0d0 & '
         'dst_rgp=3 & dst_reg=0x5 & IntDst & IntSrc'
     )
-    assert special in text
+    native = special.replace('codec_ce_counter14=0', 'codec_ce_counter14=1')
+    assert special in text and native in text
+    assert "DSP_STATIC_CNTR_OUTER = CNTR;" in text.split(native, 1)[1].split("}", 1)[0]
     body = text.split(special, 1)[1].split("}", 1)[0]
     assert "DSP_STATIC_CNTR_OUTER = CNTR;" in body
     assert "IntDst = IntSrc;" in body

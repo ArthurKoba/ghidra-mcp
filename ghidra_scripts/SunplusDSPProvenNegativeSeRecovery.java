@@ -170,7 +170,15 @@ public class SunplusDSPProvenNegativeSeRecovery extends GhidraScript {
     if(modeBefore!=null&&!modeBefore.equals(BigInteger.ZERO))
       throw new IllegalStateException("Nonbinary SE specialization context "+site.at());
     int originalBranches=conditional(ins), originalArithmeticShifts=signedRight(ins);
-    if(originalBranches==0)throw new IllegalStateException("Generic signed-SE Pcode branch missing "+site.at());
+    if(originalBranches==0){
+      // Saved programs may already contain the correct signed-right P-code
+      // from an earlier semantic refresh even without this optional context
+      // marker. Never break a proven instruction just to set a duplicate flag.
+      if(originalArithmeticShifts<1)
+        throw new IllegalStateException("No signed-right P-code or dynamic branch "+site.at());
+      println("DSP_SE_NATIVE_ALREADY_CORRECT at="+site.at()+" conditional=0 right="+originalArithmeticShifts);
+      continue;
+    }
     // The instruction may also perform DAG circular post-modification,
     // which itself emits INT_SRIGHT for signed M14. Count the *delta* from
     // the dedicated ASHIFT rather than assuming the whole instruction has

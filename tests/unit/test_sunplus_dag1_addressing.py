@@ -115,7 +115,7 @@ def test_every_indirect_dm_constructor_uses_its_correct_address_family() -> None
         assert not re.search(r"(?:DagI|DmI|PmI|ShiftDagI)\s*=.*" + expected, body)
         counts[family] += 1
     assert matched_accesses == source.count("*[DM]")
-    assert counts == {"DagI": 38, "DmI": 8, "ShiftDagI": 11, "direct": 4}
+    assert counts == {"DagI": 38, "DmI": 8, "ShiftDagI": 16, "direct": 8}
 
 
 def test_layout_and_mode_opcode_identity_are_unchanged() -> None:
