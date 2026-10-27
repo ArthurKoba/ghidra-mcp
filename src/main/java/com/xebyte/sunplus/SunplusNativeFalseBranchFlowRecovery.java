@@ -27,7 +27,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Source-derived constant-false native DSP IF-NE / IF-LE control flow.
+ * Source-derived constant-false native DSP IF-NE / IF-LE / IF-EQ control flow.
  *
  * Contracts: (1) signed SE<-15 shifts zero-extended AR (LO) right by >=16,
  * then AND SR0,1 leaves AZF true; (2) an immediate logical AR (HI) shift
@@ -45,6 +45,12 @@ public final class SunplusNativeFalseBranchFlowRecovery {
     private static final Pattern AX=Pattern.compile("^LDI AX0,0x([0-9a-f]+)$",Pattern.CASE_INSENSITIVE);
     private static final Pattern SHIFT=Pattern.compile(
        "^SR = LSHIFT AR BY -0x([0-9a-f]+) \\(HI\\)$",Pattern.CASE_INSENSITIVE);
+    private static final Pattern DM_WRITE=Pattern.compile(
+        "^DMWRITE\\s+0x([0-9a-f]+),AR$",Pattern.CASE_INSENSITIVE);
+    private static final Pattern DM_READ=Pattern.compile(
+        "^DMREAD\\s+AR,0x([0-9a-f]+)$",Pattern.CASE_INSENSITIVE);
+    private static final Pattern LDI_AR=Pattern.compile(
+        "^LDI AR,0x([0-9a-f]+)$",Pattern.CASE_INSENSITIVE);
     private static final int MAX_PROOFS=80;
     private record Proof(Instruction branch,Function owner,Address first,
                          byte[] original,String mnemonic,String kind) {}
@@ -63,6 +69,67 @@ public final class SunplusNativeFalseBranchFlowRecovery {
                     !r.getFromAddress().equals(at.subtract(3)))return true;
         return false;
     }
+    // Exact native DM roundtrip: a nonzero immediate is stored in an
+    // ordinary, nonvolatile DM word and then read back without any call,
+    // alternate entry, indirect store, or aliased write. AR+0 sets AZF from
+    // that same value. Thus IF EQ is structurally false in the STATIC
+    // execution model; asynchronous hardware writes remain UNKNOWN.
+    private static Address nonzeroDMRoundtrip(Program p,Listing listing,
+            Function owner,Instruction branch,TaskMonitor monitor)
+            throws CancelledException {
+        Address at=branch.getAddress();
+        Instruction flags=listing.getInstructionAt(at.subtract(3));
+        Instruction read=listing.getInstructionAt(at.subtract(6));
+        if(!nativeInsn(flags)||!nativeInsn(read)||
+            !"AR = AR + 0".equals(flags.toString().trim())||
+            p.getFunctionManager().getFunctionContaining(flags.getAddress())!=owner||
+            p.getFunctionManager().getFunctionContaining(read.getAddress())!=owner)
+            return null;
+        Matcher r=DM_READ.matcher(read.toString().trim());
+        if(!r.matches())return null;
+        int target=Integer.parseInt(r.group(1),16);
+        Address cell=p.getAddressFactory().getAddress(
+            String.format("DM:%04x",target));
+        MemoryBlock region=p.getMemory().getBlock(cell);
+        if(region==null||region.isVolatile()||!region.isRead()||!region.isWrite())
+            return null;
+        for(int offset=3;offset<=12;offset++){
+            monitor.checkCancelled();
+            Address candidateAt=at.subtract(3L*offset);
+            Instruction write=listing.getInstructionAt(candidateAt);
+            if(!nativeInsn(write)||!owner.getBody().contains(candidateAt))return null;
+            Matcher dst=DM_WRITE.matcher(write.toString().trim());
+            if(!dst.matches()||Integer.parseInt(dst.group(1),16)!=target)continue;
+            Instruction constant=listing.getInstructionAt(candidateAt.subtract(3));
+            if(!nativeInsn(constant)||!owner.getBody().contains(constant.getAddress()))
+                return null;
+            Matcher immediate=LDI_AR.matcher(constant.toString().trim());
+            if(!immediate.matches()||Integer.parseInt(immediate.group(1),16)==0)
+                return null;
+            if(foreignEntry(p,constant.getAddress(),branch.getAddress()))
+                return null;
+            // From the write up to the matching read, all native control
+            // steps must be straight-line. P-code STORE destinations must
+            // be absolute addresses other than the source DM word.
+            for(Address cursor=candidateAt.add(3);
+                    cursor.compareTo(read.getAddress())<0;cursor=cursor.add(3)) {
+                Instruction intermediate=listing.getInstructionAt(cursor);
+                if(!nativeInsn(intermediate)||!intermediate.getFlowType().isFallthrough()||
+                   p.getFunctionManager().getFunctionContaining(cursor)!=owner)return null;
+                for(var op:intermediate.getPcode()) {
+                    if(op.getOpcode()==PcodeOp.CALLOTHER)return null;
+                    if(op.getOpcode()==PcodeOp.STORE) {
+                        var ptr=op.getInput(1);
+                        if(!ptr.isConstant()||ptr.getOffset()==target)
+                            return null;
+                    }
+                }
+            }
+            return constant.getAddress();
+        }
+        return null;
+    }
+
     private static List<Proof> plan(Program p,TaskMonitor monitor)throws Exception {
         Listing listing=p.getListing();var fm=p.getFunctionManager();
         List<Proof> found=new ArrayList<>();
@@ -74,7 +141,9 @@ public final class SunplusNativeFalseBranchFlowRecovery {
             String text=branch.toString().trim();
             boolean ne=text.startsWith("IF NE JUMP ");
             boolean le=text.startsWith("IF LE JUMP ");
-            if(!ne&&!le||branch.getAddress().getAddressableWordOffset()<3)continue;
+            boolean eq=text.startsWith("IF EQ JUMP ");
+            if(!ne&&!le&&!eq||
+                branch.getAddress().getAddressableWordOffset()<3)continue;
             Address b=branch.getAddress();
             Function owner=fm.getFunctionContaining(b);if(owner==null||owner.isExternal())continue;
             Instruction previous=listing.getInstructionAt(b.subtract(3));
@@ -113,8 +182,14 @@ public final class SunplusNativeFalseBranchFlowRecovery {
                     "AR = 0x0100 - AX0".equals(previous.toString().trim()))
                     kind="POSITIVE_0100_MINUS_AX0";
             }
+            Address memoryProof=null;
+            if(eq){
+                memoryProof=nonzeroDMRoundtrip(p,listing,owner,branch,monitor);
+                if(memoryProof!=null)kind="NONZERO_DIRECT_DM_ROUNDTRIP";
+            }
             if(kind==null)continue;
-            Address proofStart="ZERO_HI_OF_RIGHT_16_PLUS".equals(kind)?
+            Address proofStart=memoryProof!=null?memoryProof:
+                "ZERO_HI_OF_RIGHT_16_PLUS".equals(kind)?
                 before.getAddress():first.getAddress();
             found.add(new Proof(branch,owner,proofStart,branch.getBytes(),text,kind));
             if(found.size()>MAX_PROOFS)return List.of();

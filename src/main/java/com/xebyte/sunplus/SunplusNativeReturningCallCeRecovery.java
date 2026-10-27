@@ -78,7 +78,7 @@ public final class SunplusNativeReturningCallCeRecovery {
             throw new IllegalStateException("UNSUPPORTED incomplete native C "+f.getEntryPoint());
         return code;
     }
-    private static boolean sourceReachableNativeRts(Function f,Listing listing,
+    static boolean sourceReachableNativeRts(Function f,Listing listing,
             TaskMonitor monitor)throws CancelledException {
         if(f==null||f.isExternal())return false;
         ArrayDeque<Address> todo=new ArrayDeque<>();

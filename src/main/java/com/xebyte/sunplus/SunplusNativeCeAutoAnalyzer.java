@@ -492,7 +492,27 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
                                                state.depth(),pending));
             }
         }
-        return rootCeReached&&reachedCeEnds.containsAll(ends.keySet());
+        // Conditional native flags can prove a branch into one sibling DO
+        // unreachable in the *current saved analysis state* while the source
+        // DO word still names an exact CE. Do not discard every reachable
+        // nested hardware frame merely because an independently decoded,
+        // source-bounded sibling was not visited by the abstract CFG.
+        // First require an actual reachable outer CE and at least one real
+        // nested CE; for every unreachable sibling require its own complete
+        // source-native counted-loop control proof. Such an independent
+        // proof admits only the original encoded backedge and never invents
+        // a branch making the sibling reachable.
+        if(!rootCeReached)return false;
+        boolean nestedCeReached=false;
+        for(Loop child:descendants)
+            if(reachedCeEnds.contains(child.last))nestedCeReached=true;
+        if(!nestedCeReached)return false;
+        for(Loop child:descendants) {
+            if(!reachedCeEnds.contains(child.last) &&
+               !sourceLoopCountFlowBalanced(child,p,monitor))
+                return false;
+        }
+        return true;
     }
 
     // Explicit ISA stack operations can mutate hardware PC/DO/CNTR frames
@@ -516,7 +536,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     // suffix of another function. Inspecting their full listing bodies would
     // incorrectly reject unrelated, unreachable instructions before that entry.
     // Preserve every PC/DO/CNTR frame; never invent CALL edges for tail JUMPs.
-    private static boolean returnsViaSharedPcStack(Function f, Listing listing,
+    static boolean returnsViaSharedPcStack(Function f, Listing listing,
             FunctionManager fm, Map<String,Boolean> memo,
             Set<Address> active, int depth, TaskMonitor monitor)
             throws CancelledException {
@@ -739,7 +759,7 @@ public final class SunplusNativeCeAutoAnalyzer extends AbstractAnalyzer {
     // the outer CNTR on the call-site write; completing CE pops that frame.
     // A strict counted loop/return contract is sufficient for static backedge
     // recovery and requires no firmware-specific function names or addresses.
-    private static boolean balancedCountConsumer(Function f, Listing listing,
+    static boolean balancedCountConsumer(Function f, Listing listing,
             Program p, TaskMonitor monitor) throws CancelledException {
         // Ghidra's inferred hasNoReturn flag may itself be stale. For this
         // bounded leaf, the ORIGINAL native DO, CE, immediate RTS and return

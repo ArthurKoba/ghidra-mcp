@@ -54,9 +54,9 @@ def test_resident_fresh_import_uses_native_default_abi_not_unknown():
 
 def test_post_analyze_ce_runs_after_ghidra_transaction_and_save():
     bridge = (ROOT / "src/main/java/com/xebyte/core/ProgramScriptService.java").read_text()
-    assert 'runAutoAnalysisAndPersistFlags(program, force)' in bridge
+    assert 'runAutoAnalysisAndPersistFlags(program, rediscover)' in bridge
     assert 'nativeCe.applyAfterSavedAnalysis(program,' in bridge
-    assert bridge.index('if (!runAutoAnalysisAndPersistFlags(program, force))') < bridge.index('nativeCe.applyAfterSavedAnalysis(program,')
+    assert bridge.index('if (!runAutoAnalysisAndPersistFlags(program, rediscover))') < bridge.index('nativeCe.applyAfterSavedAnalysis(program,')
     assert 'persistProgram(program, "Sunplus DSP automatic source-native DO/CE complete")' in bridge
     analyzer = MODEL.read_text()
     assert 'if (program.isChanged()) {' in analyzer
@@ -393,7 +393,7 @@ def test_stale_noreturn_is_fixed_with_source_call_and_all_direct_consumers():
 
 def test_proven_native_conditional_rts_checks_taken_return_and_fallthrough():
     source=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeReturningCallCeRecovery.java").read_text()
-    start=source.index('private static boolean sourceReachableNativeRts(')
+    start=source.index('static boolean sourceReachableNativeRts(')
     end=source.index('private static List<Candidate> discover(',start)
     flow=source[start:end]
     assert 'text.startsWith("IF ")&&text.endsWith(" RTS")' in flow
@@ -412,12 +412,12 @@ def test_nested_dsp_ce_source_missing_pcode_is_a_proven_eligible_shape():
     assert '!end.getFlowType().isCall()' in source
     assert '!end.getFlowType().isJump()' in source
     assert 'nativeCounterWrite(end)||mutatesControlStack(end)' in source
-    assert 'reachedCeEnds.containsAll(ends.keySet())' in source
+    assert '!sourceLoopCountFlowBalanced(child,p,monitor)' in source
 
 
 def test_bounded_counted_callee_uses_native_rts_not_cached_noreturn_flag():
     source=MODEL.read_text()
-    begin=source.index('private static boolean balancedCountConsumer(')
+    begin=source.index('static boolean balancedCountConsumer(')
     end=source.index('private static boolean sourceResetStackHandler(',begin)
     contract=source[begin:end]
     assert 'if(f==null||f.isExternal())return false;' in contract
@@ -502,3 +502,84 @@ def test_original_machine_call_with_computed_ce_uses_real_call_pcode_target():
     assert 'if(op.getOpcode()==PcodeOp.CALL)' in source
     assert 'nativeCallTarget=op.getInput(0).getAddress();' in source
     assert 'returnsViaSharedPcStack(provider,listing,p.getFunctionManager(),' in source
+
+
+def test_unreachable_sibling_ce_needs_independent_native_counted_loop_proof():
+    source=MODEL.read_text()
+    start=source.index('private static boolean sourceNestedFramesBalanced(')
+    end=source.index('private static boolean mutatesControlStack(',start)
+    body=source[start:end]
+    assert 'if(!rootCeReached)return false;' in body
+    assert 'if(!nestedCeReached)return false;' in body
+    assert '!sourceLoopCountFlowBalanced(child,p,monitor)' in body
+    assert 'if(!reachedCeEnds.contains(child.last) &&' in body
+    assert 'return true;' in body
+
+def test_source_native_call_and_chained_do_frames_are_one_atomic_model():
+    source=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeCallLoopClosureRecovery.java").read_text()
+    bridge=(ROOT/"src/main/java/com/xebyte/core/ProgramScriptService.java").read_text()
+    assert 'sourceReachableNativeRts(' in source
+    assert 'Could not recover jumptable at 0x' in source
+    assert 'returnsViaSharedPcStack(' in source
+    assert 'p.getProgramContext().setValue(direct,ceAt,ceAt,BigInteger.ONE)' in source
+    assert 'op(fixed,PcodeOp.BRANCHIND)!=0' in source
+    assert 'warnings(finalC)>warnings(before)' in source
+    assert 'p.endTransaction(tx,commit)' in source
+    assert 'getFunctionCount()!=savedFunctionCount' in source
+    assert 'SunplusNativeCallLoopClosureRecovery' in bridge
+    assert bridge.index('SunplusNativeCallLoopClosureRecovery') < bridge.index(
+        'SunplusNativeReturningCallCeRecovery\n                    .applyAfterSavedAnalysis(program,')
+
+def test_call_ce_model_accepts_proven_shared_native_return_suffix():
+    source=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeCallLoopClosureRecovery.java").read_text()
+    assert 'sourceReachableNativeRts(provider,listing,monitor)' in source
+    assert 'boolean sharedReturn=localReturn||' in source
+    assert 'returnsViaSharedPcStack(' in source
+    assert 'if(!sharedReturn)continue;' in source
+
+def test_nested_two_frame_counted_native_ce_has_programmed_sleigh_depth():
+    source=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeCallLoopClosureRecovery.java").read_text()
+    assert 'private static int recoverTwoFrameCountedLoops(' in source
+    assert 'sourceCounterLoad(innerWriter)' in source
+    assert 'codec_ce_nested_mode' in source
+    assert 'codec_ce_static_depth' in source
+    assert 'codec_ce_counter14' in source
+    assert 'returningCallInCountedFrame(ins,p,listing,fm,monitor)' in source
+    assert 'recoverTwoFrameCountedLoops(p,' in source
+    assert 'int level=(j==0||j==1||j==5)?1:2' in source
+    assert 'if(warnings(finalC)>warnings(before)' in source
+
+def test_source_native_unowned_counted_frame_recovery_is_architecture_scoped():
+    model=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeCallLoopClosureRecovery.java").read_text()
+    assert "private static boolean recoverUnownedCountedFrames(" in model
+    assert 'fm.getFunctionContaining(begin.getAddress())!=null' in model
+    assert 'returnIns.toString().trim().equals("RTS")' in model
+    assert 'op(returnIns,PcodeOp.RETURN)!=1' in model
+    assert 'returningCallInCountedFrame(body,p,listing,fm,monitor)' in model
+    assert 'p.getProgramContext().setValue(direct,site,site,BigInteger.ONE)' in model
+    assert 'fm.getFunctionCount()!=sourceFunctions' in model
+    assert 'warnings(output)>warnings(row.getValue())' in model
+    assert 'p.endTransaction(tx,commit)' in model
+    assert 'recoverUnownedCountedFrames(p,monitor,log)' in model
+    assert '0x23d9' not in model.lower()
+
+def test_saved_original_native_catalog_survives_forced_c_refresh():
+    source=(ROOT/"src/main/java/com/xebyte/core/ProgramScriptService.java").read_text()
+    assert 'int originalFunctionCount=program.getFunctionManager().getFunctionCount();' in source
+    assert 'originalFunctionCount>=10' in source
+    assert 'boolean rediscover=force&&!preserveOriginalNativeFunctions;' in source
+    assert 'runAutoAnalysisAndPersistFlags(program, rediscover)' in source
+    assert 'UNSUPPORTED saved DSP function count changed on C refresh' in source
+
+def test_sunplus_constant_dm_roundtrip_has_genuine_native_false_eq_semantics():
+    s=(ROOT/"src/main/java/com/xebyte/sunplus/SunplusNativeFalseBranchFlowRecovery.java").read_text()
+    sleigh=(ROOT/"processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.slaspec").read_text()
+    assert 'private static Address nonzeroDMRoundtrip(' in s
+    assert 'region==null||region.isVolatile()' in s
+    assert 'foreignEntry(p,constant.getAddress(),branch.getAddress())' in s
+    assert 'if(!ptr.isConstant()||ptr.getOffset()==target)' in s
+    assert 'Integer.parseInt(immediate.group(1),16)==0' in s
+    assert 'boolean eq=text.startsWith("IF EQ JUMP ");' in s
+    assert 'kind="NONZERO_DIRECT_DM_ROUNDTRIP"' in s
+    assert ':"IF EQ JUMP" JumpAddr is codec_arch_stack_mode=0 & codec_branch_proven_not_taken=1' in sleigh
+    assert ':"IF EQ JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3' in sleigh
