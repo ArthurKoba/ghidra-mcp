@@ -2276,6 +2276,14 @@ macro resident_tail(target) {
     call JumpAddr;
 }
 
+# A branch proven impossible from original native DM write/read/flag dataflow
+# is a fallthrough in this saved program. The full source proof is required
+# before setting codec_branch_proven_not_taken; default ISA semantics below
+# remain conditional for all other instruction sites.
+:"IF EQ JUMP" JumpAddr is codec_arch_stack_mode=0 & codec_branch_proven_not_taken=1 & type10=3 & call18=0 & cond4=0 & JumpAddr
+{
+}
+
 :"IF EQ JUMP" JumpAddr is codec_arch_stack_mode=0 & type10=3 & call18=0 & cond4=0 & JumpAddr
 {
     if (AZF != 0) goto JumpAddr;

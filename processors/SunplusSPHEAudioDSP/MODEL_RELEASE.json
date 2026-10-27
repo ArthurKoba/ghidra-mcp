@@ -1,6 +1,6 @@
 {
   "Ghidra": "12.1.3",
-  "compiled_sla_sha256": "b8bc249a835066645ee8244c3572578009418e35ae5977e9e4b77a35f12e22a9",
+  "compiled_sla_sha256": "d4faafe9dc292714feca9b25a3a0b85f13f0039f980b33916d4d7e5da1ed6211",
   "files_sha256": {
     "patches/ghidra-12.1.3/native-explicit-selfloop-c.patch": "92fe54293915b97e3a785691ec07948edf4ccc85642934578a705666b0f56211",
     "patches/ghidra-12.1.3/native-unresolved-branchind-c.patch": "909a7fcb88acd7880af2fbe0c0705104bccc51a731f062de4e22181fe94ed9a5",
@@ -8,13 +8,48 @@
     "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.cspec": "ee6cadf87147ec6dd6ccf13ef20a24d3ac9c0537795cc821077140ca56447311",
     "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.ldefs": "20bccd2874ab3f4ae062aa097312a0e89e194e5666d27e83dda3d34a6d5ed37f",
     "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.pspec": "fb9399c713a7f7b440fe32b2cea86cb93724199fe153a24b203f17f6835ef704",
-    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.slaspec": "c7c5dc95a30dd15c2a1286c847fd947e836676703e3d8d3718c95ba82d4a64b8",
+    "processors/SunplusSPHEAudioDSP/data/languages/sunplus_sphe_audio_dsp.slaspec": "cad3cea73297445d70c59f93d8f2346f1a5e254c81a2dae7224959fcbefef2c2",
     "processors/SunplusSPHEAudioDSP/data/languages/sunplus_stack_instructions.sinc": "7a6cea1c72823f3837b7f2b41a8e9c2652071f49dd3157ab7fe26338ec218e13",
     "processors/SunplusSPHEAudioDSP/data/languages/sunplus_stack_runtime.sinc": "25954314e1586515ac8ef01bc7252c48068f6332897af46fdf92065893cf76e8"
   },
   "gate": "Do not mark canonical or duplicate into HD Audio Rush until Analyzer MCP production readback accepts the installed native/SLEIGH model and saved firmware programs.",
   "language_definition_version": "0.1",
   "language_id": "SunplusSPHEAudioDSP:BE:16:default",
+  "latest_local_saved_corpus_20261027": {
+    "CE_direct": 536,
+    "CE_indirect": 0,
+    "CE_unknown": 0,
+    "C_failed": 0,
+    "C_ok": 565,
+    "C_warning_lines": 0,
+    "compiled_sla_sha256": "d4faafe9dc292714feca9b25a3a0b85f13f0039f980b33916d4d7e5da1ed6211",
+    "local_build_jar_sha256": "cf07cb5220548c33e5f621685798df55bb5d62be31a94487aa566b13f0711efb",
+    "native_DO_CE": 536,
+    "native_functions": 565,
+    "production_save_readback": "PENDING",
+    "profiles": {
+      "AC3": {
+        "C": 193,
+        "CE": 170
+      },
+      "AUX": {
+        "C": 94,
+        "CE": 70
+      },
+      "DTS": {
+        "C": 162,
+        "CE": 179
+      },
+      "PCM": {
+        "C": 116,
+        "CE": 117
+      }
+    },
+    "scope": "four saved original-source PCM/AUX/DTS/AC3 programs; local Ghidra 12.1.3; not production Analyzer",
+    "silicon_execution": "UNKNOWN",
+    "status": "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING",
+    "unsupported_native_C": 0
+  },
   "latest_local_source_native_20261026": {
     "C_warning_lines": 0,
     "canonical_save_readback": "PENDING",

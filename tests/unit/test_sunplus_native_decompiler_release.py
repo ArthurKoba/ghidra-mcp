@@ -59,7 +59,7 @@ def test_release_manifest_pins_the_complete_source_bundle():
     manifest = json.loads((ROOT / "processors/SunplusSPHEAudioDSP/MODEL_RELEASE.json").read_text())
     assert manifest["status"] == "LOCAL_ACCEPTED_CANONICAL_ANALYZER_PENDING"
     assert manifest["Ghidra"] == "12.1.3"
-    assert manifest["compiled_sla_sha256"] == "b8bc249a835066645ee8244c3572578009418e35ae5977e9e4b77a35f12e22a9"
+    assert manifest["compiled_sla_sha256"] == "d4faafe9dc292714feca9b25a3a0b85f13f0039f980b33916d4d7e5da1ed6211"
     assert len(manifest["files_sha256"]) == 9
     for name, digest in manifest["files_sha256"].items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest, name
@@ -71,3 +71,16 @@ def test_release_manifest_pins_the_complete_source_bundle():
     assert latest["vector_handler_paths_RTI_complete"] == 4
     assert latest["C_warning_lines"] == 0
     assert latest["canonical_save_readback"] == "PENDING"
+
+
+def test_latest_local_full_native_corpus_is_scoped_not_production():
+    import json
+    m=json.loads((ROOT / "processors/SunplusSPHEAudioDSP/MODEL_RELEASE.json").read_text())
+    c=m["latest_local_saved_corpus_20261027"]
+    assert (c["native_functions"],c["C_ok"],c["C_failed"]) == (565,565,0)
+    assert (c["native_DO_CE"],c["CE_direct"],c["CE_indirect"],c["CE_unknown"]) == (536,536,0,0)
+    assert c["C_warning_lines"] == c["unsupported_native_C"] == 0
+    assert sum(x["C"] for x in c["profiles"].values()) == 565
+    assert sum(x["CE"] for x in c["profiles"].values()) == 536
+    assert c["production_save_readback"] == "PENDING"
+    assert c["compiled_sla_sha256"] == m["compiled_sla_sha256"]

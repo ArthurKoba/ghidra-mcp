@@ -20,6 +20,7 @@ public class SunplusDSPSharedControlStatusRecovery extends GhidraScript {
   return r.getDecompiledFunction().getC();
  }
  private int warnings(String s){return s.split("WARNING:",-1).length-1;}
+ private int cLoops(String s){return s.split("do ", -1).length-1;}
  private byte[] hash()throws Exception{
   var md=MessageDigest.getInstance("SHA-256");byte[] bytes=new byte[8192];
   for(MemoryBlock block:currentProgram.getMemory().getBlocks())if(block.isInitialized()){
@@ -89,7 +90,11 @@ public class SunplusDSPSharedControlStatusRecovery extends GhidraScript {
    if(loopOwner!=null){
     for(Instruction precursor:listing.getInstructions(loopOwner.getBody(),true)){
      if(precursor.getAddress().compareTo(dest[0])>=0)break;
-     if(precursor.getAddress().compareTo(dest[0].subtract(0x60*3L))<0)continue;
+     // Clamp the 96-instruction lookback to the start of executable PM.
+     // Source vectors near PM:0000 would otherwise underflow and abort
+     // an unrelated shared-status recovery pass.
+     long lookbackBytes=Math.min(dest[0].getOffset(),0x60*3L);
+     if(precursor.getAddress().compareTo(dest[0].subtract(lookbackBytes))<0)continue;
      String t=precursor.toString().trim().toUpperCase(Locale.ROOT);
      if(t.startsWith("DMWRITE "+suffix+","))priorStore=true;
     }
@@ -107,10 +112,10 @@ public class SunplusDSPSharedControlStatusRecovery extends GhidraScript {
     " hardware_provider=UNKNOWN");
   if(mode.equals("audit")){println("DSP_MMIO_PROVEN_AUDIT_PASS");return;}
   byte[] raw=hash();String fns=nativeFunctions();int instructions=countInstructions();
-  Map<Function,Integer> before=new LinkedHashMap<>();int warningsBefore=0;
+  Map<Function,Integer> before=new LinkedHashMap<>(),baselineLoops=new LinkedHashMap<>();int warningsBefore=0;
   DecompInterface baseline=new DecompInterface();if(!baseline.openProgram(currentProgram))throw new IllegalStateException("C baseline unavailable");
   try{for(Function f:currentProgram.getFunctionManager().getFunctions(true))if(!f.isExternal()){
-    int w=warnings(c(baseline,f));before.put(f,w);if(w>0)warningsBefore++;
+    String oldC=c(baseline,f);int w=warnings(oldC);before.put(f,w);baselineLoops.put(f,cLoops(oldC));if(w>0)warningsBefore++;
   }}finally{baseline.dispose();}
   if(before.size()!=nativeTotal)throw new IllegalStateException("Native C coverage incomplete");
   int tx=currentProgram.startTransaction("Scoped nativeTotal DSP MMIO register asynchronous side effects");boolean accept=false;
@@ -140,7 +145,7 @@ public class SunplusDSPSharedControlStatusRecovery extends GhidraScript {
     monitor.checkCancelled();String code=c(after,e.getKey());int next=warnings(code),prev=e.getValue();
     if(next>0)warningOwners++;lines+=next;
     if(next<prev){improved++;println("DSP_MMIO_PROVEN_C_DIFF owner="+e.getKey().getEntryPoint()+" warnings="+prev+"->"+next);}
-    if(next>prev||code.contains("halt_baddata()")){
+    if(next>prev||code.contains("halt_baddata()")||cLoops(code)<baselineLoops.get(e.getKey())){
      regressed++;println("DSP_MMIO_PROVEN_C_REGRESSION owner="+e.getKey().getEntryPoint()+" warnings="+prev+"->"+next);}
    }}finally{after.dispose();}
    println("DSP_MMIO_PROVEN_C_SUMMARY nativeTotal="+nativeTotal+" C_ok="+before.size()+" C_failed=0"+

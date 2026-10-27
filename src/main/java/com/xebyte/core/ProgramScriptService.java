@@ -122,9 +122,28 @@ public class ProgramScriptService {
         // nested analyzer transactions cannot guarantee rollback. Complete
         // and persist ordinary analysis first; recover native DO/CE in an
         // isolated top-level transaction afterward.
-        if (!runAutoAnalysisAndPersistFlags(program, force)) return false;
-        if (com.xebyte.sunplus.SunplusNativeCeAutoAnalyzer.LANGUAGE.equals(
-                program.getLanguageID().getIdAsString())) {
+        boolean sourceNativeDSP=
+            com.xebyte.sunplus.SunplusNativeCeAutoAnalyzer.LANGUAGE.equals(
+                program.getLanguageID().getIdAsString());
+        int originalFunctionCount=program.getFunctionManager().getFunctionCount();
+        // A saved GZF can contain a complete native function catalog even
+        // when isAnalyzed() is false. Re-discovery is not C regeneration:
+        // reAnalyzeAll() may REMOVE existing valid native owners. Preserve
+        // all multi-function DSP catalogs, refreshing the actual source
+        // instruction semantics below without scheduling rediscovery.
+        boolean preserveOriginalNativeFunctions=sourceNativeDSP &&
+            originalFunctionCount>=10;
+        if(force&&preserveOriginalNativeFunctions)
+            Msg.info(this,"Sunplus saved native catalog: preserving "+
+                originalFunctionCount+" function identities for ISA/C regeneration");
+        boolean rediscover=force&&!preserveOriginalNativeFunctions;
+        if (!runAutoAnalysisAndPersistFlags(program, rediscover)) return false;
+        if(preserveOriginalNativeFunctions &&
+            program.getFunctionManager().getFunctionCount()!=originalFunctionCount)
+            throw new IllegalStateException(
+                "UNSUPPORTED saved DSP function count changed on C refresh "+
+                originalFunctionCount+" -> "+program.getFunctionManager().getFunctionCount());
+        if (sourceNativeDSP) {
             MessageLog dmEvidence = new MessageLog();
             if (!com.xebyte.sunplus.SunplusNativeDmWordAutoNormalizer.applyAfterSavedAnalysis(
                     program, ghidra.util.task.TaskMonitor.DUMMY, dmEvidence)) {
@@ -181,6 +200,22 @@ public class ProgramScriptService {
             if(!ordinaryCallEvidence.toString().isBlank())
                 Msg.info(this,"Sunplus ordinary native CALL continuation: "+
                     ordinaryCallEvidence);
+            // A source-proven returning CALL can uncover additional decoded
+            // DO/CE frames. Close its native continuations and their exact
+            // source-encoded backedges atomically before ordinary CE passes.
+            MessageLog callFrameEvidence=new MessageLog();
+            if(!com.xebyte.sunplus.SunplusNativeCallLoopClosureRecovery
+                    .applyAfterSavedAnalysis(program,
+                        ghidra.util.task.TaskMonitor.DUMMY,callFrameEvidence)){
+                Msg.warn(this,"Sunplus architecture CALL/CE closure rejected: "+
+                    callFrameEvidence);
+                return false;
+            }
+            if(program.isChanged())
+                persistProgram(program,"Sunplus native returning CALL and DO/CE architecture closure");
+            if(!callFrameEvidence.toString().isBlank())
+                Msg.info(this,"Sunplus native CALL/CE architecture: "+callFrameEvidence);
+
             // Native returning CALL and its immediately following CE must
             // be corrected atomically, before ordinary CE recovery.
             MessageLog returningCeEvidence=new MessageLog();

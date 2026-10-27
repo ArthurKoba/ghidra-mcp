@@ -15,8 +15,13 @@ Complete version history for the Ghidra MCP Server project.
 - **Fresh local Ghidra 12.1.3 acceptance:** four original DSP module imports,
   **547/547 generated C**, **548/548 direct DO/CE**, **0 C warnings**,
   and project save/reopen. Original bytes unchanged; Ghidra worker closed.
-- Canonical **565-function** saved Analyzer project acceptance and silicon
-  execution equivalence are **not yet verified**. See MODEL_RELEASE.json.
+- Additional complete local original-source corpus acceptance (2026-10-27):
+  **565/565 generated native C**, **536/536 direct CE**, **0 C warnings**,
+  0 unsupported native functions. Includes source-derived IF EQ constant-false
+  DM round-trip handling and returning CALL/CE recovery; runtime silicon effects
+  remain unknown. Saved original bytes are unchanged.
+- Canonical Analyzer production install/regeneration/readback of the **565-function**
+  corpus is still **pending**. See MODEL_RELEASE.json.
 
 ## v7.0.0 (unreleased) — major: tool consolidation, JSON response contract, MCP conformance suite, documentation-correctness linting
 
