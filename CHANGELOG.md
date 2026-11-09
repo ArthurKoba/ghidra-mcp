@@ -4,6 +4,12 @@ Complete version history for the Ghidra MCP Server project.
 
 ---
 
+## Briareus direct-upload cleanup
+
+- Delete temporary HTTP uploads through the same private uploader, avoiding cross-UID filesystem permission failures.
+- Restrict deletion to uploader-owned filenames and reject path traversal and symlink escapes; repeated deletion is safe.
+
+
 ## RUSH31 native Sunplus DSP automatic recovery (2026-10-27)
 
 - Promote source-proven nested depth <= 3 DO/CE, missing CE context and combined

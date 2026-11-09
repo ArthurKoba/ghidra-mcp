@@ -54,6 +54,13 @@ async def direct_artifact_upload(request: Request) -> JSONResponse:
     if not project_id:
         return JSONResponse({"error": "project_id is required"}, status_code=400)
 
+    if request.method == "DELETE":
+        try:
+            await state.run_in_worker(project_sessions.ensure_session, project_id)
+        except project_sessions.ProjectSessionError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        return _delete_direct_artifact(request)
+
     try:
         name = _safe_name(request.query_params.get("name", ""))
     except ValueError as exc:
@@ -121,3 +128,25 @@ async def direct_artifact_upload(request: Request) -> JSONResponse:
     except Exception:
         target.unlink(missing_ok=True)
         return JSONResponse({"error": "direct artifact upload failed"}, status_code=500)
+
+
+def _delete_direct_artifact(request: Request) -> JSONResponse:
+    """Remove only a file created by this private uploader, using its own UID."""
+    raw = request.query_params.get("path", "").strip()
+    if not raw:
+        return JSONResponse({"error": "path is required"}, status_code=400)
+    candidate = Path(raw)
+    root = _upload_root().resolve(strict=False)
+    target = candidate.resolve(strict=False)
+    if (
+        candidate.is_symlink()
+        or target.parent != root
+        or not re.fullmatch(r"[0-9a-f]{32}-[A-Za-z0-9._-]+", target.name)
+    ):
+        return JSONResponse({"error": "path is not a direct upload"}, status_code=400)
+    try:
+        existed = target.exists()
+        target.unlink(missing_ok=True)
+        return JSONResponse({"success": True, "deleted": existed})
+    except OSError:
+        return JSONResponse({"error": "direct artifact cleanup failed"}, status_code=500)
