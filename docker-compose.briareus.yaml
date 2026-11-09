@@ -1,0 +1,85 @@
+# Source: ArthurKoba/ghidra-mcp at 07577ecbddd6c76acc3795622fc08ec2dc73044c.
+# Coolify checks out that repository; these build contexts refer to its root.
+# Use the node private Destination; existing data volumes are explicitly selected.
+services:
+  ghidra-engine:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_PORT: '8089'
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN}
+      GHIDRA_MCP_ALLOW_SCRIPTS: '1'
+      GHIDRA_MCP_FILE_ROOT: /artifacts
+      GHIDRA_MCP_PROJECT_ROOT: /projects
+      GHIDRA_MCP_SCRIPT_ROOT: /artifacts/scripts
+      GHIDRA_MCP_SCRIPT_CACHE: /tmp/ghidra-script-cache
+      GHIDRA_MCP_WORKER_COUNT: '2'
+      GHIDRA_MCP_WORKER_JAVA_OPTS: -Xmx1024m -XX:+UseG1GC
+      JAVA_OPTS: -Xmx1024m -XX:+UseG1GC
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:?}
+    volumes:
+    - ghidra-data:/data
+    - ghidra-projects:/projects
+    - koba-artifacts:/artifacts
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 6
+    pids_limit: 768
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - test -p /data/bridge/worker-control.fifo && kill -0 1
+      interval: 30s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    networks:
+      default: {}
+  ghidra-mcp-backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.bridge
+    restart: unless-stopped
+    environment:
+      GHIDRA_MCP_URL: http://ghidra-engine:8089/
+      GHIDRA_MCP_FILE_ROOT: /artifacts
+      GHIDRA_MCP_WORKER_URLS: http://ghidra-engine:8089,http://ghidra-engine:8090
+      GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS: '1'
+      GHIDRA_MCP_MAX_CONCURRENT_REQUESTS: '2'
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN}
+      GHIDRA_MCP_TRUSTED_HOSTS: ghidra-engine
+      GHIDRA_MCP_ALLOWED_HOSTS: ghidra-mcp-backend,localhost,127.0.0.1
+      GHIDRA_MCP_SESSION_SETTINGS_PATH: /data/bridge/project_session_settings.json
+      DEPLOYMENT_ENVIRONMENT: ${DEPLOYMENT_ENVIRONMENT:?}
+    depends_on:
+      ghidra-engine:
+        condition: service_healthy
+    volumes:
+    - ghidra-data:/data
+    - koba-artifacts:/artifacts
+    networks:
+      default: {}
+    healthcheck:
+      test:
+      - CMD
+      - /app/.venv/bin/python
+      - -c
+      - import socket; s=socket.create_connection(('127.0.0.1',8081),2); s.close()
+      interval: 5s
+      timeout: 3s
+      start_period: 20s
+      retries: 20
+volumes:
+  ghidra-data:
+    external: true
+    name: ${GHIDRA_DATA_VOLUME}
+  ghidra-projects:
+    external: true
+    name: ${GHIDRA_PROJECTS_VOLUME}
+  koba-artifacts:
+    external: true
+    name: ${GHIDRA_ARTIFACTS_VOLUME}
+networks:
+  default: {}
